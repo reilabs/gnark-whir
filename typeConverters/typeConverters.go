@@ -20,6 +20,19 @@ func LittleEndian(api frontend.API, varArr []frontend.Variable) frontend.Variabl
     return frontendVar
 }
 
+func LittleEndianArr(api frontend.API, arrVarArr [][]frontend.Variable) []frontend.Variable {
+	frontendArr := make([]frontend.Variable, len(arrVarArr))
+	
+	for j := range arrVarArr {
+		frontendVar := frontend.Variable(0)
+		for i := range arrVarArr[j] {
+			frontendVar = api.Add(api.Mul(256, frontendVar), arrVarArr[j][len(arrVarArr[j]) - 1 - i])
+		}
+		frontendArr[j] = frontendVar
+	}
+    return frontendArr
+}
+
 func ByteArrToVarArr(uint8Arr []uint8) []frontend.Variable {
     frontendArr := make([]frontend.Variable, len(uint8Arr))
     for i := range frontendArr {

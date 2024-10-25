@@ -37,7 +37,7 @@ func NewKeccakWithTag(api frontend.API, tag []frontend.Variable) (*Digest, error
 	return d, nil
 }
 
-func (d *Digest) Write(in []frontend.Variable) {
+func (d *Digest) Absorb(in []frontend.Variable) {
 	u8Arr := make([]uints.U8, len(in))
 	for i := range in {
 		u8Arr[i].Val = in[i]
@@ -55,7 +55,13 @@ func (d *Digest) Write(in []frontend.Variable) {
 	d.squeeze_pos = 136
 }
 
-func (d *Digest) Sum(len int) (result []frontend.Variable) {
+func (d *Digest) AbsorbQuadraticPolynomial(in [][]frontend.Variable) {
+	for i := range in {
+		d.Absorb(in[i])
+	}
+}
+
+func (d *Digest) Squeeze(len int) (result []frontend.Variable) {
 	for i := 0; i < len; i++ {
 		if d.squeeze_pos == 136 {
 			d.squeeze_pos = 0
