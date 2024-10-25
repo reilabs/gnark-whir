@@ -16,6 +16,7 @@ type Circuit struct {
     First_OOD_Answer []frontend.Variable `gnark:"First out-of-domain query answer"` 
     Evaluation  frontend.Variable `gnark:"Supposed evaluation for the Verifier query"`
 	SumcheckPolysAsEvals [][][]frontend.Variable `gnark:"Quadratic sumcheck polynomials in their evaluation form (Evaluated over 0, 1, 2)"`
+    FoldingParameter int
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
@@ -54,15 +55,21 @@ func checkSumOverBool (api frontend.API, value frontend.Variable, polyEvals [][]
     api.AssertIsEqual(value, sumOverBools)
 }
 
-func (circuit *Circuit) Define(api frontend.API) error {
-    mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
+func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
     checkFirstSumcheckOfFirstRound(mainSponge, circuit, api)
     mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
     foldingRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-    randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[0], foldingRandomness)
-    checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[1])
-    // mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[1])
-    // foldingRandomness2 := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+    for i := 1; i < circuit.FoldingParameter; i++ {
+        randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness)
+        checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
+        mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
+        foldingRandomness = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+    }
+}
+
+func (circuit *Circuit) Define(api frontend.API) error {
+    mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
+    initialSumcheck(api, circuit, mainSponge)
     // api.AssertIsEqual(foldingRandomness2, 0)
     return nil
 }
@@ -112,6 +119,7 @@ func main() {
         First_OOD_Answer: ood_answer,
         Evaluation: evaluation, 
 		SumcheckPolysAsEvals: polyEvals,
+        FoldingParameter: 2,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
