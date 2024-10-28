@@ -1,11 +1,10 @@
-module tutorial/sumcheck-verifier-circuit
+module reilabs/whir-verifier-circuit
 
 go 1.22.5
 
 require (
 	github.com/consensys/gnark v0.10.0
 	github.com/consensys/gnark-crypto v0.13.0
-	github.com/vocdoni/gnark-crypto-primitives v0.0.1
 )
 
 require (
@@ -21,6 +20,7 @@ require (
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/rs/zerolog v1.30.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
