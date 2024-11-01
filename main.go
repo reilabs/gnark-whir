@@ -11,29 +11,30 @@ import (
 )
 
 type Circuit struct {
+    ClaimedEvaluation  frontend.Variable `gnark:"Supposed evaluation for the Verifier query"`
     IOPattern []frontend.Variable `gnark:"Input output pattern for the protocol. Used to seed the initial sponge"` 
-    MerkleRoot []frontend.Variable `gnark:"Merkle root for the Reed-Solomon encoding of the polynomial"` 
-    First_OOD_Answer []frontend.Variable `gnark:"First out-of-domain query answer"` 
-    Evaluation  frontend.Variable `gnark:"Supposed evaluation for the Verifier query"`
+    MerkleRoots [][]frontend.Variable `gnark:"Merkle roots of the initial and folded codes"` 
+    OODEvaluations [][]frontend.Variable `gnark:"Out-of-domain query evaluations"` 
 	SumcheckPolysAsEvals [][][]frontend.Variable `gnark:"Quadratic sumcheck polynomials in their evaluation form (Evaluated over 0, 1, 2)"`
     FoldingParameter int
+    Nonce []frontend.Variable
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
     helperSponge, _ := keccakSponge.NewKeccak(api)
 	helperSponge.Absorb(circuit.IOPattern)
 	mainSponge, _ := keccakSponge.NewKeccakWithTag(api, helperSponge.Squeeze(32))
-    mainSponge.Absorb(circuit.MerkleRoot)
+    mainSponge.Absorb(circuit.MerkleRoots[0])
     _ = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
     return mainSponge
 }
 
 func checkFirstSumcheckOfFirstRound (mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API) {
-    mainSponge.Absorb(circuit.First_OOD_Answer)
+    mainSponge.Absorb(circuit.OODEvaluations[0])
     initialCombinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
     plugInEvaluation := api.Add(
-        typeConverters.LittleEndian(api, circuit.First_OOD_Answer), 
-        api.Mul(initialCombinationRandomness, circuit.Evaluation),
+        typeConverters.LittleEndian(api, circuit.OODEvaluations[0]), 
+        api.Mul(initialCombinationRandomness, circuit.ClaimedEvaluation),
     )
     checkSumOverBool(api, plugInEvaluation, circuit.SumcheckPolysAsEvals[0])
 }
@@ -67,35 +68,60 @@ func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSpong
     }
 }
 
+func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
+    mainSponge.Absorb(circuit.MerkleRoots[1])
+    mainSponge.Squeeze(47)
+    mainSponge.Absorb(circuit.OODEvaluations[1])
+    mainSponge.Squeeze(32)
+    mainSponge.Squeeze(32)
+    mainSponge.Absorb(circuit.Nonce)
+    combinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+    api.AssertIsEqual(0, combinationRandomness)
+}
+
 func (circuit *Circuit) Define(api frontend.API) error {
     mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
     initialSumcheck(api, circuit, mainSponge)
-    // api.AssertIsEqual(foldingRandomness2, 0)
+    checkRounds(api, circuit, mainSponge)
     return nil
 }
 
 
 func main() {
+    claimedEvaluation, _ := new(big.Int).SetString("120", 10)
     iopattern := typeConverters.ByteArrToVarArr([]uint8{240, 159, 140, 170, 239, 184, 143, 0, 65, 51, 50, 109, 101, 114, 107, 108, 101, 95, 100, 105, 103, 101, 115, 116, 0, 83, 52, 55, 111, 111, 100, 95, 113, 117, 101, 114, 121, 0, 65, 51, 50, 111, 111, 100, 95, 97, 110, 115, 0, 83, 52, 55, 105, 110, 105, 116, 105, 97, 108, 95, 99, 111, 109, 98, 105, 110, 97, 116, 105, 111, 110, 95, 114, 97, 110, 100, 111, 109, 110, 101, 115, 115, 0, 65, 57, 54, 115, 117, 109, 99, 104, 101, 99, 107, 95, 112, 111, 108, 121, 0, 83, 52, 55, 102, 111, 108, 100, 105, 110, 103, 95, 114, 97, 110, 100, 111, 109, 110, 101, 115, 115, 0, 65, 57, 54, 115, 117, 109, 99, 104, 101, 99, 107, 95, 112, 111, 108, 121, 0, 83, 52, 55, 102, 111, 108, 100, 105, 110, 103, 95, 114, 97, 110, 100, 111, 109, 110, 101, 115, 115, 0, 65, 51, 50, 109, 101, 114, 107, 108, 101, 95, 100, 105, 103, 101, 115, 116, 0, 83, 52, 55, 111, 111, 100, 95, 113, 117, 101, 114, 121, 0, 65, 51, 50, 111, 111, 100, 95, 97, 110, 115, 0, 83, 51, 50, 115, 116, 105, 114, 95, 113, 117, 101, 114, 105, 101, 115, 95, 115, 101, 101, 100, 0, 83, 51, 50, 112, 111, 119, 95, 113, 117, 101, 114, 105, 101, 115, 0, 65, 56, 112, 111, 119, 45, 110, 111, 110, 99, 101, 0, 83, 52, 55, 99, 111, 109, 98, 105, 110, 97, 116, 105, 111, 110, 95, 114, 97, 110, 100, 111, 109, 110, 101, 115, 115, 0, 65, 57, 54, 115, 117, 109, 99, 104, 101, 99, 107, 95, 112, 111, 108, 121, 0, 83, 52, 55, 102, 111, 108, 100, 105, 110, 103, 95, 114, 97, 110, 100, 111, 109, 110, 101, 115, 115, 0, 65, 57, 54, 115, 117, 109, 99, 104, 101, 99, 107, 95, 112, 111, 108, 121, 0, 83, 52, 55, 102, 111, 108, 100, 105, 110, 103, 95, 114, 97, 110, 100, 111, 109, 110, 101, 115, 115, 0, 65, 51, 50, 102, 105, 110, 97, 108, 95, 99, 111, 101, 102, 102, 115, 0, 83, 51, 50, 102, 105, 110, 97, 108, 95, 113, 117, 101, 114, 105, 101, 115, 95, 115, 101, 101, 100, 0, 83, 51, 50, 112, 111, 119, 95, 113, 117, 101, 114, 105, 101, 115, 0, 65, 56, 112, 111, 119, 45, 110, 111, 110, 99, 101})
-    merkleRoot := typeConverters.ByteArrToVarArr([]uint8{91, 191, 10, 79, 160, 14, 48, 231, 9, 136, 174, 237, 91, 33, 107, 115, 61, 110, 60, 253, 34, 13, 138, 139, 134, 177, 20, 13, 47, 236, 192, 235})
-    ood_answer := typeConverters.ByteArrToVarArr([]uint8{4, 27, 46, 84, 196, 191, 23, 182, 251, 220, 156, 128, 85, 238, 179, 56, 241, 254, 128, 107, 179, 72, 236, 44, 74, 87, 108, 154, 134, 218, 53, 46})
-    evaluation, _ := new(big.Int).SetString("120", 10)
+    merkleRoots := [][]frontend.Variable{
+        typeConverters.ByteArrToVarArr([]uint8{86, 75, 127, 228, 31, 170, 126, 19, 179, 209, 30, 107, 197, 173, 186, 0, 131, 133, 127, 240, 217, 73, 50, 206, 238, 236, 139, 69, 35, 155, 79, 52}),
+        typeConverters.ByteArrToVarArr([]uint8{58, 107, 66, 235, 56, 51, 242, 113, 19, 161, 88, 169, 3, 19, 148, 198, 203, 99, 180, 237, 215, 227, 237, 177, 254, 215, 105, 94, 32, 218, 14, 48}),
+    }
+    oodEvaluations := [][]frontend.Variable{
+        typeConverters.ByteArrToVarArr([]uint8{34, 222, 231, 144, 26, 1, 111, 94, 211, 208, 9, 123, 2, 128, 115, 36, 22, 167, 134, 143, 221, 216, 151, 218, 157, 62, 24, 220, 237, 200, 176, 1}),
+        typeConverters.ByteArrToVarArr([]uint8{213, 6, 31, 254, 249, 36, 42, 55, 223, 187, 1, 200, 255, 121, 213, 241, 184, 70, 177, 234, 131, 195, 16, 25, 49, 76, 127, 234, 41, 200, 173, 33}),
+    }
     polyEvals := make([][][]frontend.Variable, 2)
     
     polyEvals[0] = make([][]frontend.Variable, 3)
-    polyEvals[0][0] = typeConverters.ByteArrToVarArr([]uint8{234, 189, 202, 54, 254, 88, 189, 252, 248, 56, 103, 9, 240, 34, 51, 53, 126, 240, 161, 15, 102, 232, 227, 162, 20, 171, 67, 203, 28, 187, 7, 35})
-    polyEvals[0][1] = typeConverters.ByteArrToVarArr([]uint8{122, 188, 153, 3, 135, 248, 158, 26, 251, 56, 179, 32, 27, 103, 127, 18, 95, 129, 84, 119, 107, 228, 43, 122, 196, 145, 177, 118, 228, 95, 204, 16})
-    polyEvals[0][2] = typeConverters.ByteArrToVarArr([]uint8{56, 72, 87, 174, 9, 109, 239, 51, 172, 233, 60, 234, 229, 97, 191, 86, 153, 135, 143, 195, 24, 128, 27, 138, 31, 222, 138, 101, 13, 168, 180, 24})
+    polyEvals[0][0] = typeConverters.ByteArrToVarArr([]uint8{10, 143, 212, 116, 96, 10, 226, 127, 95, 1, 246, 48, 167, 203, 62, 162, 81, 180, 163, 21, 86, 15, 90, 210, 104, 41, 43, 65, 57, 97, 216, 2})
+    polyEvals[0][1] = typeConverters.ByteArrToVarArr([]uint8{16, 231, 231, 70, 86, 121, 22, 112, 238, 188, 214, 38, 191, 177, 218, 217, 15, 87, 199, 194, 137, 196, 39, 204, 50, 144, 170, 76, 4, 153, 217, 34})
+    polyEvals[0][2] = typeConverters.ByteArrToVarArr([]uint8{178, 27, 127, 170, 216, 180, 22, 55, 14, 6, 94, 105, 187, 199, 27, 167, 68, 211, 132, 158, 3, 200, 53, 1, 134, 230, 255, 21, 71, 71, 70, 9})
     
     polyEvals[1] = make([][]frontend.Variable, 3)
-    polyEvals[1][0] = typeConverters.ByteArrToVarArr([]uint8{231, 75, 148, 173, 131, 39, 90, 195, 50, 11, 215, 81, 40, 61, 106, 172, 193, 66, 163, 254, 180, 87, 208, 152, 226, 131, 238, 244, 156, 197, 182, 19})
-    polyEvals[1][1] = typeConverters.ByteArrToVarArr([]uint8{64, 116, 125, 243, 22, 29, 240, 25, 207, 88, 133, 217, 154, 237, 11, 147, 97, 57, 19, 224, 98, 90, 212, 49, 72, 25, 155, 136, 17, 34, 83, 24})
-    polyEvals[1][2] = typeConverters.ByteArrToVarArr([]uint8{126, 12, 163, 53, 95, 139, 201, 187, 180, 185, 12, 238, 250, 117, 239, 47, 202, 167, 3, 220, 87, 21, 182, 39, 144, 147, 76, 242, 46, 225, 0, 47})
+    polyEvals[1][0] = typeConverters.ByteArrToVarArr([]uint8{220, 96, 19, 56, 152, 181, 63, 207, 103, 60, 8, 100, 22, 1, 165, 98, 58, 118, 96, 154, 94, 6, 165, 169, 236, 169, 193, 213, 102, 44, 138, 37})
+    polyEvals[1][1] = typeConverters.ByteArrToVarArr([]uint8{42, 18, 253, 161, 116, 205, 150, 65, 85, 51, 244, 44, 181, 126, 51, 166, 64, 126, 159, 24, 100, 48, 60, 148, 63, 110, 25, 189, 178, 25, 46, 10})
+    polyEvals[1][2] = typeConverters.ByteArrToVarArr([]uint8{239, 220, 57, 83, 59, 170, 35, 30, 164, 22, 107, 209, 226, 133, 13, 162, 187, 58, 81, 13, 197, 190, 41, 227, 201, 76, 169, 60, 177, 33, 113, 30})
+
+    nonce := typeConverters.ByteArrToVarArr([]uint8{0, 0, 0, 0, 0, 0, 0, 2})
 
     var circuit = Circuit{
         IOPattern: make([]frontend.Variable, len(iopattern)),
-        MerkleRoot: make([]frontend.Variable, len(merkleRoot)),
-        First_OOD_Answer: make([]frontend.Variable, len(ood_answer)),
+        MerkleRoots: [][]frontend.Variable{
+            make([]frontend.Variable, len(merkleRoots[0])),
+            make([]frontend.Variable, len(merkleRoots[1])),
+        },
+        OODEvaluations: [][]frontend.Variable{
+            make([]frontend.Variable, len(oodEvaluations[0])),
+            make([]frontend.Variable, len(oodEvaluations[1])),
+        },
 		SumcheckPolysAsEvals: [][][]frontend.Variable{
             [][]frontend.Variable {
                 make([]frontend.Variable, 32),
@@ -108,18 +134,21 @@ func main() {
                 make([]frontend.Variable, 32),
             },
         },
+        FoldingParameter: 2,
+        Nonce: make([]frontend.Variable, len(nonce)),
     }
 
     ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
     pk, vk, _ := groth16.Setup(ccs)
     
     assignment := Circuit{
+        ClaimedEvaluation: claimedEvaluation, 
         IOPattern: iopattern,
-        MerkleRoot: merkleRoot,
-        First_OOD_Answer: ood_answer,
-        Evaluation: evaluation, 
+        MerkleRoots: merkleRoots,
+        OODEvaluations: oodEvaluations,
 		SumcheckPolysAsEvals: polyEvals,
         FoldingParameter: 2,
+        Nonce: nonce,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
