@@ -18,6 +18,7 @@ type Circuit struct {
 	SumcheckPolysAsEvals [][][]frontend.Variable `gnark:"Quadratic sumcheck polynomials in their evaluation form (Evaluated over 0, 1, 2)"`
     FoldingParameter int
     Nonce []frontend.Variable
+    Values []frontend.Variable
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
@@ -56,7 +57,7 @@ func checkSumOverBool (api frontend.API, value frontend.Variable, polyEvals [][]
     api.AssertIsEqual(value, sumOverBools)
 }
 
-func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
+func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) frontend.Variable {
     checkFirstSumcheckOfFirstRound(mainSponge, circuit, api)
     mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
     foldingRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
@@ -66,9 +67,18 @@ func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSpong
         mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
         foldingRandomness = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
     }
+    return foldingRandomness;
 }
 
-func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
+func evaluatePolynomialFromCoeffs(api frontend.API, coefficients []frontend.Variable, point frontend.Variable) frontend.Variable {
+ans := frontend.Variable(0)
+for i := range coefficients {
+        ans = api.Add(api.Mul(ans, point), coefficients[len(coefficients)-1-i])
+    }
+    return ans;
+}
+
+func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness frontend.Variable) {
     mainSponge.Absorb(circuit.MerkleRoots[1])
     mainSponge.Squeeze(47)
     mainSponge.Absorb(circuit.OODEvaluations[1])
@@ -76,13 +86,17 @@ func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Di
     mainSponge.Squeeze(32)
     mainSponge.Absorb(circuit.Nonce)
     combinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-    api.AssertIsEqual(0, combinationRandomness)
+    firstPart := evaluateFunction(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness)
+    secondPart := evaluatePolynomialFromCoeffs(api, circuit.Values, combinationRandomness)
+    val := api.Add(firstPart, secondPart)
+    checkSumOverBool(api, val, circuit.SumcheckPolysAsEvals[2])
+    // api.AssertIsEqual(0, combinationRandomness)
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
     mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
-    initialSumcheck(api, circuit, mainSponge)
-    checkRounds(api, circuit, mainSponge)
+    foldingRandomness := initialSumcheck(api, circuit, mainSponge)
+    checkRounds(api, circuit, mainSponge, foldingRandomness)
     return nil
 }
 
@@ -98,7 +112,7 @@ func main() {
         typeConverters.ByteArrToVarArr([]uint8{34, 222, 231, 144, 26, 1, 111, 94, 211, 208, 9, 123, 2, 128, 115, 36, 22, 167, 134, 143, 221, 216, 151, 218, 157, 62, 24, 220, 237, 200, 176, 1}),
         typeConverters.ByteArrToVarArr([]uint8{213, 6, 31, 254, 249, 36, 42, 55, 223, 187, 1, 200, 255, 121, 213, 241, 184, 70, 177, 234, 131, 195, 16, 25, 49, 76, 127, 234, 41, 200, 173, 33}),
     }
-    polyEvals := make([][][]frontend.Variable, 2)
+    polyEvals := make([][][]frontend.Variable, 3)
     
     polyEvals[0] = make([][]frontend.Variable, 3)
     polyEvals[0][0] = typeConverters.ByteArrToVarArr([]uint8{10, 143, 212, 116, 96, 10, 226, 127, 95, 1, 246, 48, 167, 203, 62, 162, 81, 180, 163, 21, 86, 15, 90, 210, 104, 41, 43, 65, 57, 97, 216, 2})
@@ -110,7 +124,35 @@ func main() {
     polyEvals[1][1] = typeConverters.ByteArrToVarArr([]uint8{42, 18, 253, 161, 116, 205, 150, 65, 85, 51, 244, 44, 181, 126, 51, 166, 64, 126, 159, 24, 100, 48, 60, 148, 63, 110, 25, 189, 178, 25, 46, 10})
     polyEvals[1][2] = typeConverters.ByteArrToVarArr([]uint8{239, 220, 57, 83, 59, 170, 35, 30, 164, 22, 107, 209, 226, 133, 13, 162, 187, 58, 81, 13, 197, 190, 41, 227, 201, 76, 169, 60, 177, 33, 113, 30})
 
+    polyEvals[2] = make([][]frontend.Variable, 3)
+    polyEvals[2][0] = typeConverters.ByteArrToVarArr([]uint8{36, 222, 57, 96, 229, 182, 10, 156, 146, 55, 203, 10, 82, 150, 28, 253, 37, 43, 111, 27, 253, 252, 181, 176, 186, 121, 112, 152, 120, 141, 24, 37})
+    polyEvals[2][1] = typeConverters.ByteArrToVarArr([]uint8{12, 47, 14, 59, 235, 21, 232, 226, 218, 29, 7, 100, 248, 68, 74, 178, 117, 144, 11, 219, 204, 99, 251, 255, 12, 155, 35, 161, 100, 174, 39, 42})
+    polyEvals[2][2] = typeConverters.ByteArrToVarArr([]uint8{71, 31, 180, 191, 83, 21, 145, 10, 45, 19, 220, 74, 19, 157, 46, 255, 166, 91, 150, 109, 181, 133, 65, 80, 227, 51, 112, 165, 48, 48, 215, 13})
+
     nonce := typeConverters.ByteArrToVarArr([]uint8{0, 0, 0, 0, 0, 0, 0, 2})
+
+    values := []frontend.Variable{}
+    
+    x := new(big.Int)
+    x, _ = new(big.Int).SetString("15233370024777066226892608845629840578731860879375228223866025860976611362517", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("11509341979417137109519374240686510629546919199367423229885774639868721342667", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("967690657780154726746583711555794416134111668929127941541910150944015942910", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("1642333241442275361735206746609330838996697019876328574844091937300495788803", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("15916231591392408490743692778938179069263829901936759302937404285774240531566", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("18920945058859735553448679877234169919703426795547505783642838706742181833185", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("19057592479724098853411062669677431601855279383995441981059823906189762654167", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("14311314004437920522915747262601733911861792170802648648743381289608059381950", 10)
+    values = append(values, x)
+    x, _ = new(big.Int).SetString("10442419555260406476717668966960340212855614230732577011576948230611439217962", 10)
+    values = append(values, x)
+
 
     var circuit = Circuit{
         IOPattern: make([]frontend.Variable, len(iopattern)),
@@ -133,9 +175,15 @@ func main() {
                 make([]frontend.Variable, 32),
                 make([]frontend.Variable, 32),
             },
+            [][]frontend.Variable{
+                make([]frontend.Variable, 32),
+                make([]frontend.Variable, 32),
+                make([]frontend.Variable, 32),
+            },
         },
         FoldingParameter: 2,
         Nonce: make([]frontend.Variable, len(nonce)),
+        Values: make([]frontend.Variable, len(values)),
     }
 
     ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
@@ -149,6 +197,7 @@ func main() {
 		SumcheckPolysAsEvals: polyEvals,
         FoldingParameter: 2,
         Nonce: nonce,
+        Values: values,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
