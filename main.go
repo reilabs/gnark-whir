@@ -18,7 +18,7 @@ type Circuit struct {
 	SumcheckPolysAsEvals [][][]frontend.Variable `gnark:"Quadratic sumcheck polynomials in their evaluation form (Evaluated over 0, 1, 2)"`
     FoldingParameter int
     Nonce []frontend.Variable
-    Values []frontend.Variable
+    Answers [][]frontend.Variable
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
@@ -57,28 +57,28 @@ func checkSumOverBool (api frontend.API, value frontend.Variable, polyEvals [][]
     api.AssertIsEqual(value, sumOverBools)
 }
 
-func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) frontend.Variable {
+func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) (foldingRandomness []frontend.Variable) {
     checkFirstSumcheckOfFirstRound(mainSponge, circuit, api)
     mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
-    foldingRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+    foldingRandomness = append(foldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
     for i := 1; i < circuit.FoldingParameter; i++ {
-        randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness)
+        randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness[len(foldingRandomness)-1])
         checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
         mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
-        foldingRandomness = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+        foldingRandomness = append(foldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
     }
     return foldingRandomness;
 }
 
 func evaluatePolynomialFromCoeffs(api frontend.API, coefficients []frontend.Variable, point frontend.Variable) frontend.Variable {
-ans := frontend.Variable(0)
-for i := range coefficients {
+    ans := frontend.Variable(0)
+    for i := range coefficients {
         ans = api.Add(api.Mul(ans, point), coefficients[len(coefficients)-1-i])
     }
     return ans;
 }
 
-func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness frontend.Variable) {
+func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
     mainSponge.Absorb(circuit.MerkleRoots[1])
     mainSponge.Squeeze(47)
     mainSponge.Absorb(circuit.OODEvaluations[1])
@@ -86,11 +86,14 @@ func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Di
     mainSponge.Squeeze(32)
     mainSponge.Absorb(circuit.Nonce)
     combinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-    firstPart := evaluateFunction(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness)
-    secondPart := evaluatePolynomialFromCoeffs(api, circuit.Values, combinationRandomness)
+    firstPart := evaluateFunction(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness[len(foldingRandomness)-1])
+    values := []frontend.Variable{typeConverters.LittleEndian(api, circuit.OODEvaluations[1])}
+    for i := range circuit.Answers {
+        values = append(values, multivarPoly(circuit.Answers[i], foldingRandomness, api))
+    }
+    secondPart := evaluatePolynomialFromCoeffs(api, values, combinationRandomness)
     val := api.Add(firstPart, secondPart)
     checkSumOverBool(api, val, circuit.SumcheckPolysAsEvals[2])
-    // api.AssertIsEqual(0, combinationRandomness)
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
@@ -100,6 +103,17 @@ func (circuit *Circuit) Define(api frontend.API) error {
     return nil
 }
 
+func newBigInt(s string) *big.Int {
+    bigInt, _ := new(big.Int).SetString(s, 10)
+    return bigInt
+}
+
+func multivarPoly (coefs []frontend.Variable, vars []frontend.Variable, api frontend.API) frontend.Variable {
+	if (len(vars) == 0) { return coefs[0] }
+	deg_zero := multivarPoly(coefs[:len(coefs)/2], vars[:len(vars)-1], api)
+	deg_one := api.Mul(vars[len(vars)-1], multivarPoly(coefs[len(coefs)/2:], vars[:len(vars)-1], api))
+	return api.Add(deg_zero, deg_one)
+}
 
 func main() {
     claimedEvaluation, _ := new(big.Int).SetString("120", 10)
@@ -131,28 +145,56 @@ func main() {
 
     nonce := typeConverters.ByteArrToVarArr([]uint8{0, 0, 0, 0, 0, 0, 0, 2})
 
-    values := []frontend.Variable{}
-    
-    x := new(big.Int)
-    x, _ = new(big.Int).SetString("15233370024777066226892608845629840578731860879375228223866025860976611362517", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("11509341979417137109519374240686510629546919199367423229885774639868721342667", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("967690657780154726746583711555794416134111668929127941541910150944015942910", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("1642333241442275361735206746609330838996697019876328574844091937300495788803", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("15916231591392408490743692778938179069263829901936759302937404285774240531566", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("18920945058859735553448679877234169919703426795547505783642838706742181833185", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("19057592479724098853411062669677431601855279383995441981059823906189762654167", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("14311314004437920522915747262601733911861792170802648648743381289608059381950", 10)
-    values = append(values, x)
-    x, _ = new(big.Int).SetString("10442419555260406476717668966960340212855614230732577011576948230611439217962", 10)
-    values = append(values, x)
-
+    answers := [][]frontend.Variable{
+		{
+			newBigInt("24"),
+			newBigInt("28"),
+			newBigInt("32"),
+			newBigInt("36"),
+		},
+		{
+			newBigInt("18575743860132551163049618562570143701435352955997839169025642836883178712166"),
+			newBigInt("7614392827869430883320186147888368183130613265973363502239242875387424482944"),
+			newBigInt("18541284667445585825837159478463867753374237976364922179151047100467478749339"),
+			newBigInt("7579933635182465546107727063782092235069498286340446512364647138971724520117"),
+		},
+		{
+			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+		},
+		{
+			newBigInt("3036825470211001432023850034576825283285115157561985718669349593061730636259"),
+			newBigInt("13963717309787156383356665305744812538611367811729435203455348084978622472084"),
+			newBigInt("3002366277524036112443074831655524705389256065480850344543142390319705812292"),
+			newBigInt("13929258117100191063775890102823511960715508719648299829329140882236597648117"),
+		},
+		{
+			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+		},
+		{
+			newBigInt("3312499011706723988670051657947229906451987894211068711679007214997929228011"),
+			newBigInt("14273850043969844259583642132036517739674099640459653570591212909656845887805"),
+			newBigInt("3346958204393689308250826860868530484347846986292204085805214417739954051982"),
+			newBigInt("14308309236656809579164417334957818317569958732540788944717420112398870711776"),
+		},
+		{
+			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+		},
+		{
+			newBigInt("18851417401628273860749291235420351285924272793061175088022408728208778414798"),
+			newBigInt("7924525562052118918232317904844851715680648082669616411110604503128724148405"),
+			newBigInt("18885876594315239197961750319526627233985387772694092077897004464624478377629"),
+			newBigInt("7958984754739084255444776988951127663741763062302533400985200239544424111236"),
+		},
+	}
 
     var circuit = Circuit{
         IOPattern: make([]frontend.Variable, len(iopattern)),
@@ -183,7 +225,16 @@ func main() {
         },
         FoldingParameter: 2,
         Nonce: make([]frontend.Variable, len(nonce)),
-        Values: make([]frontend.Variable, len(values)),
+        Answers: [][]frontend.Variable{
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+            make([]frontend.Variable, 4),
+        },
     }
 
     ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
@@ -197,7 +248,7 @@ func main() {
 		SumcheckPolysAsEvals: polyEvals,
         FoldingParameter: 2,
         Nonce: nonce,
-        Values: values,
+        Answers: answers,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
