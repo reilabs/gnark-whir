@@ -32,7 +32,7 @@ func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.
     return mainSponge
 }
 
-func checkFirstSumcheckOfFirstRound (mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API) {
+func checkTheVeryFirstSumcheck (mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API) {
     mainSponge.Absorb(circuit.OODEvaluations[0])
     initialCombinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
     plugInEvaluation := api.Add(
@@ -60,7 +60,7 @@ func checkSumOverBool (api frontend.API, value frontend.Variable, polyEvals [][]
 }
 
 func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) (foldingRandomness []frontend.Variable) {
-    checkFirstSumcheckOfFirstRound(mainSponge, circuit, api)
+    checkTheVeryFirstSumcheck(mainSponge, circuit, api)
     mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
     foldingRandomness = append(foldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
     for i := 1; i < circuit.FoldingParameter; i++ {
@@ -80,41 +80,47 @@ func evaluatePolynomialFromCoeffs(api frontend.API, coefficients []frontend.Vari
     return ans;
 }
 
+func firstSumcheckOfARound(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
+    combinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+    prevPolynEvalAtFoldingRandomness := evaluateFunction(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness[len(foldingRandomness)-1])
+    OODandStirChallengeAnswers := []frontend.Variable{typeConverters.LittleEndian(api, circuit.OODEvaluations[1])}
+    for i := range circuit.Answers[0] {
+        OODandStirChallengeAnswers = append(OODandStirChallengeAnswers, multivarPoly(circuit.Answers[0][i], foldingRandomness, api))
+    }
+    addedPart := evaluatePolynomialFromCoeffs(api, OODandStirChallengeAnswers, combinationRandomness)
+    supposedSum := api.Add(prevPolynEvalAtFoldingRandomness, addedPart)
+    checkSumOverBool(api, supposedSum, circuit.SumcheckPolysAsEvals[2])
+}
+
 func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
     mainSponge.Absorb(circuit.MerkleRoots[1])
-    mainSponge.Squeeze(47)
+    mainSponge.Squeeze(47) // OODQuery
     mainSponge.Absorb(circuit.OODEvaluations[1])
-    mainSponge.Squeeze(32)
-    mainSponge.Squeeze(32)
+    mainSponge.Squeeze(32) // Stir Queries Seed
+    mainSponge.Squeeze(32) // Proof of Work queries
     mainSponge.Absorb(circuit.Nonce)
-    combinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-    firstPart := evaluateFunction(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness[len(foldingRandomness)-1])
-    values := []frontend.Variable{typeConverters.LittleEndian(api, circuit.OODEvaluations[1])}
-    for i := range circuit.Answers[0] {
-        values = append(values, multivarPoly(circuit.Answers[0][i], foldingRandomness, api))
-    }
-    secondPart := evaluatePolynomialFromCoeffs(api, values, combinationRandomness)
-    val := api.Add(firstPart, secondPart)
-    checkSumOverBool(api, val, circuit.SumcheckPolysAsEvals[2])
-    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[2])
-    var newFoldingRandomness []frontend.Variable 
-    newFoldingRandomness = append(newFoldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
+    firstSumcheckOfARound(api, circuit, mainSponge, foldingRandomness)
     
-    randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[2], newFoldingRandomness[0])
-    checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[3])
-
-    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[3])
-    newFoldingRandomness = append(newFoldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
+    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[2])
+    foldingRandomness = []frontend.Variable{}
+    foldingRandomness = append(foldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
+    
+    for i := 1; i < circuit.FoldingParameter; i++ {
+        randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[2 + i-1], foldingRandomness[len(foldingRandomness)-1])
+        checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[2 + i])
+        mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[2 + i])
+        foldingRandomness = append(foldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
+    }
 
     // Checks in line 512-522 is omitted for now as we need to swap out the ChaCha part. Here is a sketch of what we need to do
         // var finalFolds []frontend.Variable
         // for i := range circuit.Answers[1] {
-            // finalFolds = append(finalFolds, multivarPoly(circuit.Answers[1][i], newFoldingRandomness, api))
+            // finalFolds = append(finalFolds, multivarPoly(circuit.Answers[1][i], foldingRandomness, api))
         // }
         // finalEvaluations = [Use ChaCha to create random indexes. Use these to get random field elements and evaluate the final polynomial on these random field elements.]
         // Check if finalFolds == finalEvaluations
-        // 
-    api.AssertIsEqual(typeConverters.LittleEndian(api, circuit.FinalCoeffs[0]), multivarPoly(circuit.Answers[1][0], newFoldingRandomness, api))
+        
+    api.AssertIsEqual(typeConverters.LittleEndian(api, circuit.FinalCoeffs[0]), multivarPoly(circuit.Answers[1][0], foldingRandomness, api))
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
