@@ -17,8 +17,10 @@ type Circuit struct {
     OODEvaluations [][]frontend.Variable `gnark:"Out-of-domain query evaluations"` 
 	SumcheckPolysAsEvals [][][]frontend.Variable `gnark:"Quadratic sumcheck polynomials in their evaluation form (Evaluated over 0, 1, 2)"`
     FoldingParameter int
+    NumberOfRounds int
     Nonce []frontend.Variable
-    Answers [][]frontend.Variable
+    Answers [][][]frontend.Variable
+    FinalCoeffs [][]frontend.Variable
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
@@ -88,12 +90,31 @@ func checkRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Di
     combinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
     firstPart := evaluateFunction(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness[len(foldingRandomness)-1])
     values := []frontend.Variable{typeConverters.LittleEndian(api, circuit.OODEvaluations[1])}
-    for i := range circuit.Answers {
-        values = append(values, multivarPoly(circuit.Answers[i], foldingRandomness, api))
+    for i := range circuit.Answers[0] {
+        values = append(values, multivarPoly(circuit.Answers[0][i], foldingRandomness, api))
     }
     secondPart := evaluatePolynomialFromCoeffs(api, values, combinationRandomness)
     val := api.Add(firstPart, secondPart)
     checkSumOverBool(api, val, circuit.SumcheckPolysAsEvals[2])
+    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[2])
+    var newFoldingRandomness []frontend.Variable 
+    newFoldingRandomness = append(newFoldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
+    
+    randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[2], newFoldingRandomness[0])
+    checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[3])
+
+    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[3])
+    newFoldingRandomness = append(newFoldingRandomness, typeConverters.BigEndian(api, mainSponge.Squeeze(47)))
+
+    // Checks in line 512-522 is omitted for now as we need to swap out the ChaCha part. Here is a sketch of what we need to do
+        // var finalFolds []frontend.Variable
+        // for i := range circuit.Answers[1] {
+            // finalFolds = append(finalFolds, multivarPoly(circuit.Answers[1][i], newFoldingRandomness, api))
+        // }
+        // finalEvaluations = [Use ChaCha to create random indexes. Use these to get random field elements and evaluate the final polynomial on these random field elements.]
+        // Check if finalFolds == finalEvaluations
+        // 
+    api.AssertIsEqual(typeConverters.LittleEndian(api, circuit.FinalCoeffs[0]), multivarPoly(circuit.Answers[1][0], newFoldingRandomness, api))
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
@@ -126,7 +147,7 @@ func main() {
         typeConverters.ByteArrToVarArr([]uint8{34, 222, 231, 144, 26, 1, 111, 94, 211, 208, 9, 123, 2, 128, 115, 36, 22, 167, 134, 143, 221, 216, 151, 218, 157, 62, 24, 220, 237, 200, 176, 1}),
         typeConverters.ByteArrToVarArr([]uint8{213, 6, 31, 254, 249, 36, 42, 55, 223, 187, 1, 200, 255, 121, 213, 241, 184, 70, 177, 234, 131, 195, 16, 25, 49, 76, 127, 234, 41, 200, 173, 33}),
     }
-    polyEvals := make([][][]frontend.Variable, 3)
+    polyEvals := make([][][]frontend.Variable, 4)
     
     polyEvals[0] = make([][]frontend.Variable, 3)
     polyEvals[0][0] = typeConverters.ByteArrToVarArr([]uint8{10, 143, 212, 116, 96, 10, 226, 127, 95, 1, 246, 48, 167, 203, 62, 162, 81, 180, 163, 21, 86, 15, 90, 210, 104, 41, 43, 65, 57, 97, 216, 2})
@@ -143,57 +164,93 @@ func main() {
     polyEvals[2][1] = typeConverters.ByteArrToVarArr([]uint8{12, 47, 14, 59, 235, 21, 232, 226, 218, 29, 7, 100, 248, 68, 74, 178, 117, 144, 11, 219, 204, 99, 251, 255, 12, 155, 35, 161, 100, 174, 39, 42})
     polyEvals[2][2] = typeConverters.ByteArrToVarArr([]uint8{71, 31, 180, 191, 83, 21, 145, 10, 45, 19, 220, 74, 19, 157, 46, 255, 166, 91, 150, 109, 181, 133, 65, 80, 227, 51, 112, 165, 48, 48, 215, 13})
 
+    polyEvals[3] = make([][]frontend.Variable, 3)
+    polyEvals[3][0] = typeConverters.ByteArrToVarArr([]uint8{59, 236, 36, 56, 125, 180, 76, 198, 37, 46, 34, 229, 97, 255, 170, 111, 193, 205, 54, 216, 123, 235, 177, 86, 41, 39, 98, 242, 119, 73, 50, 19})
+    polyEvals[3][1] = typeConverters.ByteArrToVarArr([]uint8{10, 221, 44, 149, 102, 6, 104, 25, 165, 116, 244, 56, 16, 60, 17, 15, 165, 69, 119, 175, 249, 156, 36, 153, 0, 21, 38, 110, 193, 159, 173, 24})
+    polyEvals[3][2] = typeConverters.ByteArrToVarArr([]uint8{95, 94, 210, 193, 96, 32, 213, 9, 214, 221, 89, 45, 240, 231, 183, 178, 174, 251, 51, 234, 165, 195, 177, 24, 209, 118, 90, 81, 240, 129, 246, 39})
+
+    finalCoeffs := make([][]frontend.Variable, 1)
+    finalCoeffs[0] = typeConverters.ByteArrToVarArr([]uint8{219, 191, 5, 3, 52, 60, 254, 232, 154, 225, 179, 221, 81, 92, 183, 236, 160, 47, 247, 170, 216, 89, 18, 10, 65, 123, 6, 176, 84, 145, 183, 24})
+
     nonce := typeConverters.ByteArrToVarArr([]uint8{0, 0, 0, 0, 0, 0, 0, 2})
 
-    answers := [][]frontend.Variable{
+    answers := [][][]frontend.Variable{
 		{
-			newBigInt("24"),
-			newBigInt("28"),
-			newBigInt("32"),
-			newBigInt("36"),
-		},
-		{
-			newBigInt("18575743860132551163049618562570143701435352955997839169025642836883178712166"),
-			newBigInt("7614392827869430883320186147888368183130613265973363502239242875387424482944"),
-			newBigInt("18541284667445585825837159478463867753374237976364922179151047100467478749339"),
-			newBigInt("7579933635182465546107727063782092235069498286340446512364647138971724520117"),
-		},
-		{
-			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
-			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
-			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
-			newBigInt("35263367762369950740330511775103563231496777067347350277712"),
-		},
-		{
-			newBigInt("3036825470211001432023850034576825283285115157561985718669349593061730636259"),
-			newBigInt("13963717309787156383356665305744812538611367811729435203455348084978622472084"),
-			newBigInt("3002366277524036112443074831655524705389256065480850344543142390319705812292"),
-			newBigInt("13929258117100191063775890102823511960715508719648299829329140882236597648117"),
-		},
-		{
-			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
-			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
-			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
-			newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
-		},
-		{
-			newBigInt("3312499011706723988670051657947229906451987894211068711679007214997929228011"),
-			newBigInt("14273850043969844259583642132036517739674099640459653570591212909656845887805"),
-			newBigInt("3346958204393689308250826860868530484347846986292204085805214417739954051982"),
-			newBigInt("14308309236656809579164417334957818317569958732540788944717420112398870711776"),
-		},
-		{
-			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
-			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
-			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
-			newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
-		},
-		{
-			newBigInt("18851417401628273860749291235420351285924272793061175088022408728208778414798"),
-			newBigInt("7924525562052118918232317904844851715680648082669616411110604503128724148405"),
-			newBigInt("18885876594315239197961750319526627233985387772694092077897004464624478377629"),
-			newBigInt("7958984754739084255444776988951127663741763062302533400985200239544424111236"),
-		},
+            {
+                newBigInt("24"),
+                newBigInt("28"),
+                newBigInt("32"),
+                newBigInt("36"),
+            },
+            {
+                newBigInt("18575743860132551163049618562570143701435352955997839169025642836883178712166"),
+                newBigInt("7614392827869430883320186147888368183130613265973363502239242875387424482944"),
+                newBigInt("18541284667445585825837159478463867753374237976364922179151047100467478749339"),
+                newBigInt("7579933635182465546107727063782092235069498286340446512364647138971724520117"),
+            },
+            {
+                newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+                newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+                newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+                newBigInt("35263367762369950740330511775103563231496777067347350277712"),
+            },
+            {
+                newBigInt("3036825470211001432023850034576825283285115157561985718669349593061730636259"),
+                newBigInt("13963717309787156383356665305744812538611367811729435203455348084978622472084"),
+                newBigInt("3002366277524036112443074831655524705389256065480850344543142390319705812292"),
+                newBigInt("13929258117100191063775890102823511960715508719648299829329140882236597648117"),
+            },
+            {
+                newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+                newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+                newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+                newBigInt("21888242871839275222246405745257275088548364400416034343698204186575808495609"),
+            },
+            {
+                newBigInt("3312499011706723988670051657947229906451987894211068711679007214997929228011"),
+                newBigInt("14273850043969844259583642132036517739674099640459653570591212909656845887805"),
+                newBigInt("3346958204393689308250826860868530484347846986292204085805214417739954051982"),
+                newBigInt("14308309236656809579164417334957818317569958732540788944717420112398870711776"),
+            },
+            {
+                newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+                newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+                newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+                newBigInt("21888242871839275186983037982887324348217852625312471112201427119228458217889"),
+            },
+            {
+                newBigInt("18851417401628273860749291235420351285924272793061175088022408728208778414798"),
+                newBigInt("7924525562052118918232317904844851715680648082669616411110604503128724148405"),
+                newBigInt("18885876594315239197961750319526627233985387772694092077897004464624478377629"),
+                newBigInt("7958984754739084255444776988951127663741763062302533400985200239544424111236"),
+            },
+        },
+        {
+            {
+                newBigInt("6123922853079448331343150595468617552890117696294467973354470596735912462747"), 
+                newBigInt("7607571759569218165742013529480170137312586498728732253382153336652725793963"), 
+                newBigInt("9091220666058988000140876463491722721735055301162996533409836076569539125179"), 
+                newBigInt("10574869572548757834539739397503275306157524103597260813437518816486352456395"), 
+            },
+            {
+                newBigInt("6123922853079448331343150595468617552890117696294467973354470596735912462747"), 
+                newBigInt("7607571759569218165742013529480170137312586498728732253382153336652725793963"), 
+                newBigInt("9091220666058988000140876463491722721735055301162996533409836076569539125179"), 
+                newBigInt("10574869572548757834539739397503275306157524103597260813437518816486352456395"), 
+            },
+            {
+                newBigInt("6123922853079448331343150595468617552890117696294467973354470596735912462747"), 
+                newBigInt("7607571759569218165742013529480170137312586498728732253382153336652725793963"), 
+                newBigInt("9091220666058988000140876463491722721735055301162996533409836076569539125179"), 
+                newBigInt("10574869572548757834539739397503275306157524103597260813437518816486352456395"), 
+            },
+            {
+                newBigInt("6123922853079448331343150595468617552890117696294467973354470596735912462747"), 
+                newBigInt("7607571759569218165742013529480170137312586498728732253382153336652725793963"), 
+                newBigInt("9091220666058988000140876463491722721735055301162996533409836076569539125179"), 
+                newBigInt("10574869572548757834539739397503275306157524103597260813437518816486352456395"),
+            },
+        },
 	}
 
     var circuit = Circuit{
@@ -222,18 +279,34 @@ func main() {
                 make([]frontend.Variable, 32),
                 make([]frontend.Variable, 32),
             },
+            [][]frontend.Variable{
+                make([]frontend.Variable, 32),
+                make([]frontend.Variable, 32),
+                make([]frontend.Variable, 32),
+            },
         },
         FoldingParameter: 2,
         Nonce: make([]frontend.Variable, len(nonce)),
-        Answers: [][]frontend.Variable{
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
-            make([]frontend.Variable, 4),
+        Answers: [][][]frontend.Variable{
+            [][]frontend.Variable{
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+            },
+            [][]frontend.Variable{
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+                make([]frontend.Variable, 4),
+            },
+        },
+        FinalCoeffs: [][]frontend.Variable{
+            make([]frontend.Variable, 32),
         },
     }
 
@@ -249,6 +322,7 @@ func main() {
         FoldingParameter: 2,
         Nonce: nonce,
         Answers: answers,
+        FinalCoeffs: finalCoeffs,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
