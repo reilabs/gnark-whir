@@ -25,22 +25,23 @@ type Circuit struct {
     Nonce []frontend.Variable
     Answers [][][]frontend.Variable
     FinalCoeffs []frontend.Variable
+    TranscriptInCircuit TranscriptInCircuit
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
     helperSponge, _ := keccakSponge.NewKeccak(api)
 	helperSponge.Absorb(circuit.IOPattern)
 	mainSponge, _ := keccakSponge.NewKeccakWithTag(api, helperSponge.Squeeze(32))
-    mainSponge.Absorb(circuit.MerkleRoots[0])
+    mainSponge.Absorb(circuit.TranscriptInCircuit.InitialMerkleRoot)
     _ = utilities.BigEndian(api, mainSponge.Squeeze(47))
     return mainSponge
 }
 
 func checkTheVeryFirstSumcheck (mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API) {
-    mainSponge.Absorb(circuit.OODEvaluations[0])
+    mainSponge.Absorb(circuit.TranscriptInCircuit.InitialOODEvaluation)
     initialCombinationRandomness := utilities.BigEndian(api, mainSponge.Squeeze(47))
     plugInEvaluation := api.Add(
-        utilities.LittleEndian(api, circuit.OODEvaluations[0]), 
+        utilities.LittleEndian(api, circuit.TranscriptInCircuit.InitialOODEvaluation), 
         api.Mul(initialCombinationRandomness, circuit.ClaimedEvaluation),
     )
     utilities.CheckSumOverBool(api, plugInEvaluation, circuit.SumcheckPolysAsEvals[0])
@@ -63,7 +64,7 @@ func initialSumchecks(api frontend.API, circuit *Circuit, mainSponge *keccakSpon
 func firstSumcheckOfARound(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
     combinationRandomness := utilities.BigEndian(api, mainSponge.Squeeze(47))
     prevPolynEvalAtFoldingRandomness := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness[len(foldingRandomness)-1])
-    OODandStirChallengeAnswers := []frontend.Variable{utilities.LittleEndian(api, circuit.OODEvaluations[1])}
+    OODandStirChallengeAnswers := []frontend.Variable{utilities.LittleEndian(api, circuit.OODEvaluations[0])}
     for i := range circuit.Answers[0] {
         OODandStirChallengeAnswers = append(OODandStirChallengeAnswers, utilities.MultivarPoly(circuit.Answers[0][i], foldingRandomness, api))
     }
@@ -74,9 +75,9 @@ func firstSumcheckOfARound(api frontend.API, circuit *Circuit, mainSponge *kecca
 
 func checkMainRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
     //This should be in a for loop
-    mainSponge.Absorb(circuit.MerkleRoots[1])
+    mainSponge.Absorb(circuit.MerkleRoots[0])
     mainSponge.Squeeze(47) // OODQuery
-    mainSponge.Absorb(circuit.OODEvaluations[1])
+    mainSponge.Absorb(circuit.OODEvaluations[0])
     mainSponge.Squeeze(32) // Stir Queries Seed
     mainSponge.Squeeze(32) // Proof of Work queries
     mainSponge.Absorb(circuit.Nonce)
@@ -112,6 +113,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 }
 
 type ProofTranscript struct {
+    Commitment Commitment `json:"Commitment"`
     ClaimedEvaluation string `json:"ClaimedEvaluation"`
 	PolynomialsAsEvaluations [][][]uint8 `json:"PolynomialsAsEvaluations"`
     OODEvaluations [][]uint8 `json:"OODEvaluations"`
@@ -122,48 +124,14 @@ type ProofTranscript struct {
     Answers [][][]string `json:"Answers"`
 }
 
-func strToVar (str string) frontend.Variable {
-    return frontend.Variable(utilities.NewBigIntFromString(str))
+type Commitment struct {
+    InitialMerkleRoot []uint8 `json:"InitialMerkleRoot"`
+    InitialOODEvaluation []uint8 `json:"InitialOODEvaluation"`
 }
 
-func strArrToVarArr(strArr []string) []frontend.Variable {
-    var ans []frontend.Variable
-    for _, v := range strArr {
-        ans = append(ans, strToVar(v))
-    }
-    return ans;
-}
-
-func str2DArrToVar2DArr(str2DArr [][]string) [][]frontend.Variable {
-    var ans [][]frontend.Variable
-    for i := range str2DArr {
-        ans = append(ans, strArrToVarArr(str2DArr[i]))
-    }
-    return ans;
-}
-
-func byte2DArrToVar2DArr(byte2DArr [][]uint8) [][]frontend.Variable {
-    var ans [][]frontend.Variable
-    for i := range byte2DArr {
-        ans = append(ans, utilities.ByteArrToVarArr(byte2DArr[i]))
-    }
-    return ans;
-}
-
-func str3DArrToVar3DArr(str3DArr [][][]string) [][][]frontend.Variable {
-    var ans [][][]frontend.Variable
-    for i := range str3DArr {
-        ans = append(ans, str2DArrToVar2DArr(str3DArr[i]))
-    }
-    return ans;
-}
-
-func byte3DArrToVar3DArr(byte3DArr [][][]uint8) [][][]frontend.Variable {
-    var ans [][][]frontend.Variable
-    for i := range byte3DArr {
-        ans = append(ans, byte2DArrToVar2DArr(byte3DArr[i]))
-    }
-    return ans;
+type TranscriptInCircuit struct {
+    InitialMerkleRoot []frontend.Variable
+    InitialOODEvaluation []frontend.Variable
 }
 
 func main() {
@@ -176,24 +144,27 @@ func main() {
     var proofTranscript ProofTranscript
     json.Unmarshal(byteValue, &proofTranscript)
 
-    claimedEvaluation := strToVar(proofTranscript.ClaimedEvaluation)
+    claimedEvaluation := utilities.StrToVar(proofTranscript.ClaimedEvaluation)
     iopattern := utilities.ByteArrToVarArr(proofTranscript.IOPattern)
-    merkleRoots := byte2DArrToVar2DArr(proofTranscript.MerkleRoots)
-    oodEvaluations := byte2DArrToVar2DArr(proofTranscript.OODEvaluations)
-    polyEvals := byte3DArrToVar3DArr(proofTranscript.PolynomialsAsEvaluations)
+    merkleRoots := utilities.Byte2DArrToVar2DArr(proofTranscript.MerkleRoots)
+    oodEvaluations := utilities.Byte2DArrToVar2DArr(proofTranscript.OODEvaluations)
+    polyEvals := utilities.Byte3DArrToVar3DArr(proofTranscript.PolynomialsAsEvaluations)
     finalCoeffs := utilities.ByteArrToVarArr(proofTranscript.FinalCoeffs)
     nonce := utilities.ByteArrToVarArr(proofTranscript.Nonce)
-    answers := str3DArrToVar3DArr(proofTranscript.Answers)
+    answers := utilities.Str3DArrToVar3DArr(proofTranscript.Answers)
+    
+    transcriptInCircuit := TranscriptInCircuit{
+        InitialMerkleRoot: utilities.ByteArrToVarArr(proofTranscript.Commitment.InitialMerkleRoot),
+        InitialOODEvaluation: utilities.ByteArrToVarArr(proofTranscript.Commitment.InitialOODEvaluation),
+    }
 
     var circuit = Circuit{
         IOPattern: make([]frontend.Variable, len(iopattern)),
         MerkleRoots: [][]frontend.Variable{
             make([]frontend.Variable, len(merkleRoots[0])),
-            make([]frontend.Variable, len(merkleRoots[1])),
         },
         OODEvaluations: [][]frontend.Variable{
             make([]frontend.Variable, len(oodEvaluations[0])),
-            make([]frontend.Variable, len(oodEvaluations[1])),
         },
 		SumcheckPolysAsEvals: [][][]frontend.Variable{
             [][]frontend.Variable {
@@ -238,6 +209,10 @@ func main() {
             },
         },
         FinalCoeffs: make([]frontend.Variable, len(finalCoeffs)),
+        TranscriptInCircuit: TranscriptInCircuit{
+            InitialMerkleRoot: make([]frontend.Variable, len(transcriptInCircuit.InitialMerkleRoot)),
+            InitialOODEvaluation: make([]frontend.Variable, len(transcriptInCircuit.InitialOODEvaluation)),
+        },
     }
 
     ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
@@ -253,6 +228,7 @@ func main() {
         Nonce: nonce,
         Answers: answers,
         FinalCoeffs: finalCoeffs,
+        TranscriptInCircuit: transcriptInCircuit,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())

@@ -79,3 +79,46 @@ func NewBigIntFromString(s string) *big.Int {
     return bigInt
 }
 
+func StrToVar (str string) frontend.Variable {
+    return frontend.Variable(NewBigIntFromString(str))
+}
+
+func StrArrToVarArr(strArr []string) []frontend.Variable {
+    var ans []frontend.Variable
+    for _, v := range strArr {
+        ans = append(ans, StrToVar(v))
+    }
+    return ans;
+}
+
+func Str2DArrToVar2DArr(str2DArr [][]string) [][]frontend.Variable {
+    var ans [][]frontend.Variable
+    for i := range str2DArr {
+        ans = append(ans, StrArrToVarArr(str2DArr[i]))
+    }
+    return ans;
+}
+
+func Byte2DArrToVar2DArr(byte2DArr [][]uint8) [][]frontend.Variable {
+    var ans [][]frontend.Variable
+    for i := range byte2DArr {
+        ans = append(ans, ByteArrToVarArr(byte2DArr[i]))
+    }
+    return ans;
+}
+
+func Str3DArrToVar3DArr(str3DArr [][][]string) [][][]frontend.Variable {
+    var ans [][][]frontend.Variable
+    for i := range str3DArr {
+        ans = append(ans, Str2DArrToVar2DArr(str3DArr[i]))
+    }
+    return ans;
+}
+
+func Byte3DArrToVar3DArr(byte3DArr [][][]uint8) [][][]frontend.Variable {
+    var ans [][][]frontend.Variable
+    for i := range byte3DArr {
+        ans = append(ans, Byte2DArrToVar2DArr(byte3DArr[i]))
+    }
+    return ans;
+}
