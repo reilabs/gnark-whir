@@ -26,6 +26,7 @@ type Circuit struct {
     Answers [][][]frontend.Variable
     FinalCoeffs []frontend.Variable
     TranscriptInCircuit TranscriptInCircuit
+    InitialSumcheckPolyEvals [][][]frontend.Variable
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
@@ -44,18 +45,18 @@ func checkTheVeryFirstSumcheck (mainSponge *keccakSponge.Digest, circuit *Circui
         utilities.LittleEndian(api, circuit.TranscriptInCircuit.InitialOODEvaluation), 
         api.Mul(initialCombinationRandomness, circuit.ClaimedEvaluation),
     )
-    utilities.CheckSumOverBool(api, plugInEvaluation, circuit.SumcheckPolysAsEvals[0])
+    utilities.CheckSumOverBool(api, plugInEvaluation, circuit.InitialSumcheckPolyEvals[0])
 }
 
 
 func initialSumchecks(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) (foldingRandomness []frontend.Variable) {
     checkTheVeryFirstSumcheck(mainSponge, circuit, api)
-    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
+    mainSponge.AbsorbQuadraticPolynomial(circuit.InitialSumcheckPolyEvals[0])
     foldingRandomness = append(foldingRandomness, utilities.BigEndian(api, mainSponge.Squeeze(47)))
     for i := 1; i < circuit.FoldingParameter; i++ {
-        randEval := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness[len(foldingRandomness)-1])
-        utilities.CheckSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
-        mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
+        randEval := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.InitialSumcheckPolyEvals[i-1], foldingRandomness[len(foldingRandomness)-1])
+        utilities.CheckSumOverBool(api, randEval, circuit.InitialSumcheckPolyEvals[i])
+        mainSponge.AbsorbQuadraticPolynomial(circuit.InitialSumcheckPolyEvals[i])
         foldingRandomness = append(foldingRandomness, utilities.BigEndian(api, mainSponge.Squeeze(47)))
     }
     return foldingRandomness;
@@ -63,14 +64,14 @@ func initialSumchecks(api frontend.API, circuit *Circuit, mainSponge *keccakSpon
 
 func firstSumcheckOfARound(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
     combinationRandomness := utilities.BigEndian(api, mainSponge.Squeeze(47))
-    prevPolynEvalAtFoldingRandomness := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.SumcheckPolysAsEvals[1], foldingRandomness[len(foldingRandomness)-1])
+    prevPolynEvalAtFoldingRandomness := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.InitialSumcheckPolyEvals[1], foldingRandomness[len(foldingRandomness)-1])
     OODandStirChallengeAnswers := []frontend.Variable{utilities.LittleEndian(api, circuit.OODEvaluations[0])}
     for i := range circuit.Answers[0] {
         OODandStirChallengeAnswers = append(OODandStirChallengeAnswers, utilities.MultivarPoly(circuit.Answers[0][i], foldingRandomness, api))
     }
     addedPart := utilities.UnivarPoly(api, OODandStirChallengeAnswers, combinationRandomness)
     supposedSum := api.Add(prevPolynEvalAtFoldingRandomness, addedPart)
-    utilities.CheckSumOverBool(api, supposedSum, circuit.SumcheckPolysAsEvals[2])
+    utilities.CheckSumOverBool(api, supposedSum, circuit.SumcheckPolysAsEvals[0])
 }
 
 func checkMainRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest, foldingRandomness []frontend.Variable) {
@@ -83,14 +84,14 @@ func checkMainRounds(api frontend.API, circuit *Circuit, mainSponge *keccakSpong
     mainSponge.Absorb(circuit.Nonce)
     firstSumcheckOfARound(api, circuit, mainSponge, foldingRandomness)
     
-    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[2])
+    mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
     foldingRandomness = []frontend.Variable{}
     foldingRandomness = append(foldingRandomness, utilities.BigEndian(api, mainSponge.Squeeze(47)))
     
     for i := 1; i < circuit.FoldingParameter; i++ {
-        randEval := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.SumcheckPolysAsEvals[2 + i-1], foldingRandomness[len(foldingRandomness)-1])
-        utilities.CheckSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[2 + i])
-        mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[2 + i])
+        randEval := utilities.QuadraticUnivarPolyFromEvaluations(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness[len(foldingRandomness)-1])
+        utilities.CheckSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
+        mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
         foldingRandomness = append(foldingRandomness, utilities.BigEndian(api, mainSponge.Squeeze(47)))
     }
 
@@ -116,6 +117,7 @@ type ProofTranscript struct {
     Commitment Commitment `json:"Commitment"`
     ClaimedEvaluation string `json:"ClaimedEvaluation"`
 	PolynomialsAsEvaluations [][][]uint8 `json:"PolynomialsAsEvaluations"`
+	InitialSumcheckPolyEvals [][][]uint8 `json:"InitialSumcheckPolyEvals"`
     OODEvaluations [][]uint8 `json:"OODEvaluations"`
     MerkleRoots [][]uint8 `json:"MerkleRoots"`
     Nonce []uint8 `json:"Nonce"`
@@ -148,6 +150,7 @@ func main() {
     iopattern := utilities.ByteArrToVarArr(proofTranscript.IOPattern)
     merkleRoots := utilities.Byte2DArrToVar2DArr(proofTranscript.MerkleRoots)
     oodEvaluations := utilities.Byte2DArrToVar2DArr(proofTranscript.OODEvaluations)
+    initialSumcheckPolyEvals := utilities.Byte3DArrToVar3DArr(proofTranscript.InitialSumcheckPolyEvals)
     polyEvals := utilities.Byte3DArrToVar3DArr(proofTranscript.PolynomialsAsEvaluations)
     finalCoeffs := utilities.ByteArrToVarArr(proofTranscript.FinalCoeffs)
     nonce := utilities.ByteArrToVarArr(proofTranscript.Nonce)
@@ -166,8 +169,8 @@ func main() {
         OODEvaluations: [][]frontend.Variable{
             make([]frontend.Variable, len(oodEvaluations[0])),
         },
-		SumcheckPolysAsEvals: [][][]frontend.Variable{
-            [][]frontend.Variable {
+		InitialSumcheckPolyEvals: [][][]frontend.Variable{
+            [][]frontend.Variable{
                 make([]frontend.Variable, 32),
                 make([]frontend.Variable, 32),
                 make([]frontend.Variable, 32),
@@ -177,6 +180,8 @@ func main() {
                 make([]frontend.Variable, 32),
                 make([]frontend.Variable, 32),
             },
+        },
+		SumcheckPolysAsEvals: [][][]frontend.Variable{
             [][]frontend.Variable{
                 make([]frontend.Variable, 32),
                 make([]frontend.Variable, 32),
@@ -229,6 +234,7 @@ func main() {
         Answers: answers,
         FinalCoeffs: finalCoeffs,
         TranscriptInCircuit: transcriptInCircuit,
+        InitialSumcheckPolyEvals: initialSumcheckPolyEvals,
     }
 
     witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
