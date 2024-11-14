@@ -16,7 +16,6 @@ import (
 
 type Circuit struct {
     ClaimedEvaluation  frontend.Variable `gnark:"Supposed evaluation for the Verifier query"`
-    IOPattern []frontend.Variable `gnark:"Input output pattern for the protocol. Used to seed the initial sponge"` 
     MerkleRoots [][]frontend.Variable `gnark:"Merkle roots of the initial and folded codes"` 
     OODEvaluations [][]frontend.Variable `gnark:"Out-of-domain query evaluations"` 
 	SumcheckPolysAsEvals [][][]frontend.Variable `gnark:"Quadratic sumcheck polynomials in their evaluation form (Evaluated over 0, 1, 2)"`
@@ -31,7 +30,7 @@ type Circuit struct {
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
     helperSponge, _ := keccakSponge.NewKeccak(api)
-	helperSponge.Absorb(circuit.IOPattern)
+	helperSponge.Absorb(circuit.TranscriptInCircuit.IOPattern)
 	mainSponge, _ := keccakSponge.NewKeccakWithTag(api, helperSponge.Squeeze(32))
     mainSponge.Absorb(circuit.TranscriptInCircuit.InitialMerkleRoot)
     _ = utilities.BigEndian(api, mainSponge.Squeeze(47))
@@ -121,17 +120,18 @@ type ProofTranscript struct {
     OODEvaluations [][]uint8 `json:"OODEvaluations"`
     MerkleRoots [][]uint8 `json:"MerkleRoots"`
     Nonce []uint8 `json:"Nonce"`
-    IOPattern []uint8 `json:"IOPattern"`
     FinalCoeffs []uint8 `json:"FinalCoeffs"`
     Answers [][][]string `json:"Answers"`
 }
 
 type Commitment struct {
+    IOPattern []uint8 `json:"IOPattern"`
     InitialMerkleRoot []uint8 `json:"InitialMerkleRoot"`
     InitialOODEvaluation []uint8 `json:"InitialOODEvaluation"`
 }
 
 type TranscriptInCircuit struct {
+    IOPattern []frontend.Variable `gnark:"Input output pattern for the protocol. Used to seed the initial sponge"` 
     InitialMerkleRoot []frontend.Variable
     InitialOODEvaluation []frontend.Variable
 }
@@ -147,7 +147,6 @@ func main() {
     json.Unmarshal(byteValue, &proofTranscript)
 
     claimedEvaluation := utilities.StrToVar(proofTranscript.ClaimedEvaluation)
-    iopattern := utilities.ByteArrToVarArr(proofTranscript.IOPattern)
     merkleRoots := utilities.Byte2DArrToVar2DArr(proofTranscript.MerkleRoots)
     oodEvaluations := utilities.Byte2DArrToVar2DArr(proofTranscript.OODEvaluations)
     initialSumcheckPolyEvals := utilities.Byte3DArrToVar3DArr(proofTranscript.InitialSumcheckPolyEvals)
@@ -157,12 +156,12 @@ func main() {
     answers := utilities.Str3DArrToVar3DArr(proofTranscript.Answers)
     
     transcriptInCircuit := TranscriptInCircuit{
+        IOPattern: utilities.ByteArrToVarArr(proofTranscript.Commitment.IOPattern), 
         InitialMerkleRoot: utilities.ByteArrToVarArr(proofTranscript.Commitment.InitialMerkleRoot),
         InitialOODEvaluation: utilities.ByteArrToVarArr(proofTranscript.Commitment.InitialOODEvaluation),
     }
 
     var circuit = Circuit{
-        IOPattern: make([]frontend.Variable, len(iopattern)),
         MerkleRoots: [][]frontend.Variable{
             make([]frontend.Variable, len(merkleRoots[0])),
         },
@@ -215,6 +214,7 @@ func main() {
         },
         FinalCoeffs: make([]frontend.Variable, len(finalCoeffs)),
         TranscriptInCircuit: TranscriptInCircuit{
+            IOPattern: make([]frontend.Variable, len(transcriptInCircuit.IOPattern)),
             InitialMerkleRoot: make([]frontend.Variable, len(transcriptInCircuit.InitialMerkleRoot)),
             InitialOODEvaluation: make([]frontend.Variable, len(transcriptInCircuit.InitialOODEvaluation)),
         },
@@ -225,7 +225,6 @@ func main() {
     
     assignment := Circuit{
         ClaimedEvaluation: claimedEvaluation, 
-        IOPattern: iopattern,
         MerkleRoots: merkleRoots,
         OODEvaluations: oodEvaluations,
 		SumcheckPolysAsEvals: polyEvals,
