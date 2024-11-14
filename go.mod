@@ -19,6 +19,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/rs/zerolog v1.30.0 // indirect
+	github.com/vocdoni/gnark-crypto-primitives v0.0.1
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
