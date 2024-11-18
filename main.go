@@ -26,6 +26,7 @@ type Circuit struct {
     FinalCoeffs []frontend.Variable
     TranscriptInCircuit TranscriptInCircuit
     InitialSumcheckPolyEvals [][][]frontend.Variable
+    Rounds []Round
 }
 
 func initializeSpongeWithIOPatternAndMerkleRoot (circuit *Circuit, api frontend.API) *keccakSponge.Digest {
@@ -134,6 +135,11 @@ type TranscriptInCircuit struct {
     IOPattern []frontend.Variable `gnark:"Input output pattern for the protocol. Used to seed the initial sponge"` 
     InitialMerkleRoot []frontend.Variable
     InitialOODEvaluation []frontend.Variable
+    Rounds []Round
+}
+
+type Round struct {
+    MerkleRoot []uint8 `json:"MerkleRoot"`
 }
 
 func main() {
@@ -159,6 +165,7 @@ func main() {
         IOPattern: utilities.ByteArrToVarArr(proofTranscript.Commitment.IOPattern), 
         InitialMerkleRoot: utilities.ByteArrToVarArr(proofTranscript.Commitment.InitialMerkleRoot),
         InitialOODEvaluation: utilities.ByteArrToVarArr(proofTranscript.Commitment.InitialOODEvaluation),
+        Rounds: make([]Round, 0),
     }
 
     var circuit = Circuit{
