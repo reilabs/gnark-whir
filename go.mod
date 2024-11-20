@@ -1,6 +1,6 @@
 module reilabs/whir-verifier-circuit
 
-go 1.22.5
+go 1.23.3
 
 require (
 	github.com/consensys/gnark v0.10.0
@@ -18,6 +18,7 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
+	github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3 // indirect
 	github.com/rs/zerolog v1.30.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
