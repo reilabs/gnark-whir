@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/consensys/gnark/frontend"
-	go_ark_serialize "github.com/reilabs/go-ark-serialize"
 	"os"
 	"reilabs/whir-verifier-circuit/keccakSponge"
 	"reilabs/whir-verifier-circuit/typeConverters"
+
+	"github.com/consensys/gnark/frontend"
+	go_ark_serialize "github.com/reilabs/go-ark-serialize"
 )
 
 type Circuit struct {
@@ -101,6 +102,7 @@ func main() {
 	}
 	defer f.Close()
 	var x []ProofElement
-	n, err := go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
-	fmt.Printf("%v, %v", n, err)
+	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
+
+	//verify_circuit(x)
 }
