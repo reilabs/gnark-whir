@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
@@ -84,6 +86,21 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 	return nil
 }
 
+func prefixDecodePath[T any](prevPath []T, prefixLen int, suffix []T) []T {
+	if prefixLen == 0 {
+		fmt.Println("prefix len 0")
+		res := make([]T, len(suffix))
+		copy(res, suffix)
+		return res
+	} else {
+		fmt.Println("prefix len IS NOT 0 ", len(suffix))
+		res := make([]T, prefixLen+len(suffix))
+		copy(res, prevPath[:prefixLen])
+		copy(res[prefixLen:], suffix)
+		return res
+	}
+}
+
 func main() {
 
 	var numOfLeavesProved = 2
@@ -95,6 +112,15 @@ func main() {
 	authPaths[1] = make([][]uints.U8, 2)
 	authPaths[1][0] = uints.NewU8Array([]uint8{210, 251, 227, 90, 167, 45, 18, 202, 115, 95, 12, 44, 121, 251, 100, 56, 10, 223, 89, 69, 229, 214, 221, 45, 154, 183, 246, 77, 110, 157, 230, 64})
 	authPaths[1][1] = uints.NewU8Array([]uint8{172, 194, 50, 157, 236, 173, 136, 136, 253, 203, 140, 59, 202, 25, 15, 36, 77, 228, 212, 82, 43, 88, 169, 178, 85, 239, 40, 106, 240, 15, 188, 12})
+	var prev_path = authPaths[0]
+
+	var prefixLengths = []int{0, 2}
+	var sufixes = make([][][]uints.U8, 2)
+	sufixes[0] = make([][]uints.U8, 1)
+	sufixes[0][0] = uints.NewU8Array([]uint8{210, 251, 227, 90, 167, 45, 18, 202, 115, 95, 12, 44, 121, 251, 100, 56, 10, 223, 89, 69, 229, 214, 221, 45, 154, 183, 246, 77, 110, 157, 230, 64})
+	sufixes[1] = nil
+
+	authPaths[1] = prefixDecodePath(prev_path, prefixLengths[1], sufixes[1])
 
 	var leaves = make([][]uints.U8, numOfLeavesProved)
 	leaves[0] = make([]uints.U8, 136)
