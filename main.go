@@ -104,5 +104,5 @@ func main() {
 	var x []ProofElement
 	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
 
-	//verify_circuit(x)
+	verify_circuit(x)
 }
