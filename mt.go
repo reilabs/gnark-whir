@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
@@ -111,102 +109,100 @@ func reverse[T any](s []T) []T {
 func toLittleEndianBytes(num uint64) []uint8 {
 	bytes := make([]uint8, 8)
 	for i := 0; i < 8; i++ {
-		bytes[i] = uint8(num >> (8 * i) & 0xFF) // Extract each byte
+		bytes[i] = uint8(num >> (8 * i) & 0xFF)
 	}
 	return bytes
 }
 
-func verify_circuit(proofs []ProofElement) {
-	// for i := range proofs {
-	i := 0
-	var numOfLeavesProved = 2
-	var treeHeight = len(proofs[i].A.AuthPathsSuffixes[0])
+func verify_circuit(proofs []ProofElement, roots []KeccakDigest) {
 
-	var authPaths = make([][][]uints.U8, numOfLeavesProved)
+	for i := range proofs {
+		// i := 0
+		var numOfLeavesProved = len(proofs[i].A.LeafIndexes)
+		var treeHeight = len(proofs[i].A.AuthPathsSuffixes[0])
 
-	println(i)
-	println(numOfLeavesProved)
-	for j := 0; j < numOfLeavesProved; j++ {
-		authPaths[j] = make([][]uints.U8, treeHeight)
-	}
-	var authPathsTemp = make([][]KeccakDigest, numOfLeavesProved)
-	var prevPath = proofs[i].A.AuthPathsSuffixes[0]
-	authPathsTemp[0] = reverse(prevPath)
+		var authPaths = make([][][]uints.U8, numOfLeavesProved)
 
-	for j := 0; j < len(authPaths[0]); j++ {
-		authPaths[0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
-	}
+		// println(i)
+		// println(numOfLeavesProved)
+		// println("proof len", len(proofs))
+		// println(treeHeight)
+		// fmt.Println(proofs[i].A)
+		// fmt.Println(proofs[i].B)
+		var leaves = make([][]uints.U8, numOfLeavesProved)
+		var leaf_sibling_hashes = make([][]uints.U8, numOfLeavesProved)
 
-	for j := 1; j < numOfLeavesProved; j++ {
-		prevPath = prefixDecodePath(prevPath, proofs[i].A.AuthPathsPrefixLengths[j], proofs[i].A.AuthPathsSuffixes[j])
-		authPathsTemp[j] = reverse(prevPath)
-		for z := 0; z < treeHeight; z++ {
-			authPaths[j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
-		}
-	}
+		for j := 0; j < numOfLeavesProved; j++ {
+			authPaths[j] = make([][]uints.U8, treeHeight)
 
-	var leaves = make([][]uints.U8, numOfLeavesProved)
-	leaves[0] = make([]uints.U8, 136)
-	leaves[1] = make([]uints.U8, 136)
-
-	var leaf_indexes = make([]uints.U8, numOfLeavesProved)
-	var leaf_sibling_hashes = make([][]uints.U8, numOfLeavesProved)
-	leaf_sibling_hashes[0] = make([]uints.U8, 32)
-	leaf_sibling_hashes[1] = make([]uints.U8, 32)
-	var root_hash = make([]uints.U8, 32)
-
-	var circuit = VerifyMerkleProofCircuit{
-		Leaves:            leaves,
-		LeafIndexes:       leaf_indexes,
-		LeafSiblingHashes: leaf_sibling_hashes,
-		AuthPaths: [][][]uints.U8{
-			{make([]uints.U8, 32), make([]uints.U8, 32)},
-			{make([]uints.U8, 32), make([]uints.U8, 32)},
-		},
-		RootHash: root_hash,
-	}
-
-	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
-	pk, vk, _ := groth16.Setup(ccs)
-
-	for j := 0; j < numOfLeavesProved; j++ {
-		fmt.Println(proofs[i].A.LeafSiblingHashes[j].KeccakDigest[:])
-		leaf_sibling_hashes[j] = uints.NewU8Array(proofs[i].A.LeafSiblingHashes[j].KeccakDigest[:])
-		leaf_indexes[j] = uints.NewU8(uint8(proofs[i].A.LeafIndexes[j]))
-		fmt.Println(proofs[i].B[j])
-	}
-
-	for z := range numOfLeavesProved {
-		big_output := make([]uint8, 136)
-		copy(big_output[0:8], toLittleEndianBytes(4))
-
-		for j := range proofs[i].B[z] {
-			input := proofs[i].B[z][j]
-			output := make([]uint8, 4*8)
-
-			for i, num := range input.Limbs {
-				serialized := toLittleEndianBytes(num)
-				copy(output[i*8:(i+1)*8], serialized)
+			for z := 0; z < treeHeight; z++ {
+				authPaths[j][z] = make([]uints.U8, 32)
 			}
-			copy(big_output[j*32+8:(j+1)*32+8], output)
+			leaves[j] = make([]uints.U8, 136)
+			leaf_sibling_hashes[j] = make([]uints.U8, 32)
 		}
-		leaves[z] = uints.NewU8Array(big_output)
+
+		var leaf_indexes = make([]uints.U8, numOfLeavesProved)
+
+		var root_hash = make([]uints.U8, 32)
+
+		var circuit = VerifyMerkleProofCircuit{
+			Leaves:            leaves,
+			LeafIndexes:       leaf_indexes,
+			LeafSiblingHashes: leaf_sibling_hashes,
+			AuthPaths:         authPaths,
+			RootHash:          root_hash,
+		}
+
+		ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+		pk, vk, _ := groth16.Setup(ccs)
+
+		var authPathsTemp = make([][]KeccakDigest, numOfLeavesProved)
+		var prevPath = proofs[i].A.AuthPathsSuffixes[0]
+		authPathsTemp[0] = reverse(prevPath)
+
+		for j := 0; j < len(authPaths[0]); j++ {
+			authPaths[0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
+		}
+
+		for j := 1; j < numOfLeavesProved; j++ {
+			prevPath = prefixDecodePath(prevPath, proofs[i].A.AuthPathsPrefixLengths[j], proofs[i].A.AuthPathsSuffixes[j])
+			authPathsTemp[j] = reverse(prevPath)
+			for z := 0; z < treeHeight; z++ {
+				authPaths[j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
+			}
+		}
+
+		for z := range numOfLeavesProved {
+			leaf_sibling_hashes[z] = uints.NewU8Array(proofs[i].A.LeafSiblingHashes[z].KeccakDigest[:])
+			leaf_indexes[z] = uints.NewU8(uint8(proofs[i].A.LeafIndexes[z]))
+			big_output := make([]uint8, 136)
+			copy(big_output[0:8], toLittleEndianBytes(4))
+
+			for j := range proofs[i].B[z] {
+				input := proofs[i].B[z][j]
+				output := make([]uint8, 4*8)
+
+				for i, num := range input.Limbs {
+					serialized := toLittleEndianBytes(num)
+					copy(output[i*8:(i+1)*8], serialized)
+				}
+				copy(big_output[j*32+8:(j+1)*32+8], output)
+			}
+			leaves[z] = uints.NewU8Array(big_output)
+		}
+
+		assignment := VerifyMerkleProofCircuit{
+			Leaves:            leaves,
+			LeafIndexes:       leaf_indexes,
+			LeafSiblingHashes: leaf_sibling_hashes,
+			AuthPaths:         authPaths,
+			RootHash:          uints.NewU8Array(roots[i].KeccakDigest[:]),
+		}
+
+		witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+		publicWitness, _ := witness.Public()
+		proof, _ := groth16.Prove(ccs, pk, witness)
+		groth16.Verify(proof, vk, publicWitness)
 	}
-
-	// leaf_sibling_hashes[0] = uints.NewU8Array([]uint8{193, 13, 183, 152, 249, 32, 72, 69, 254, 130, 132, 51, 181, 111, 143, 200, 6, 210, 97, 0, 43, 145, 81, 96, 50, 28, 138, 188, 200, 17, 91, 181})
-	// leaf_sibling_hashes[1] = uints.NewU8Array([]uint8{121, 181, 105, 15, 9, 169, 235, 69, 109, 178, 75, 230, 203, 40, 219, 154, 63, 128, 89, 249, 147, 67, 183, 172, 89, 171, 109, 198, 185, 183, 195, 2})
-
-	assignment := VerifyMerkleProofCircuit{
-		Leaves:            leaves,
-		LeafIndexes:       leaf_indexes,
-		LeafSiblingHashes: leaf_sibling_hashes,
-		AuthPaths:         authPaths,
-		RootHash:          uints.NewU8Array([]uint8{86, 75, 127, 228, 31, 170, 126, 19, 179, 209, 30, 107, 197, 173, 186, 0, 131, 133, 127, 240, 217, 73, 50, 206, 238, 236, 139, 69, 35, 155, 79, 52}),
-	}
-
-	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
-	publicWitness, _ := witness.Public()
-	proof, _ := groth16.Prove(ccs, pk, witness)
-	groth16.Verify(proof, vk, publicWitness)
-	// }
 }

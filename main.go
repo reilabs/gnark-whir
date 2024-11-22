@@ -104,5 +104,7 @@ func main() {
 	var x []ProofElement
 	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
 
-	verify_circuit(x)
+	var roots = []KeccakDigest{{[32]uint8{86, 75, 127, 228, 31, 170, 126, 19, 179, 209, 30, 107, 197, 173, 186, 0, 131, 133, 127, 240, 217, 73, 50, 206, 238, 236, 139, 69, 35, 155, 79, 52}},
+		{[32]uint8{58, 107, 66, 235, 56, 51, 242, 113, 19, 161, 88, 169, 3, 19, 148, 198, 203, 99, 180, 237, 215, 227, 237, 177, 254, 215, 105, 94, 32, 218, 14, 48}}}
+	verify_circuit(x, roots)
 }
