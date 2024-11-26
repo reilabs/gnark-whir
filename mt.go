@@ -7,9 +7,12 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/std/hash/sha3"
 	"github.com/consensys/gnark/std/math/uints"
+	gnark_nimue "github.com/reilabs/gnark-nimue"
 )
 
 type VerifyMerkleProofCircuit struct {
+	IO         []byte
+	Transcript [560]uints.U8 `gnark:",public"`
 	// Inputs
 	Leaves            [][]uints.U8
 	LeafIndexes       []uints.U8
@@ -20,7 +23,20 @@ type VerifyMerkleProofCircuit struct {
 }
 
 func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
+
+	arthur := gnark_nimue.NewArthur(api, circuit.IO, circuit.Transcript[:])
+	rootHash := circuit.Transcript[0:32]
+	api.Println(rootHash)
+	firstChallenge := make([]uints.U8, 32)
+	firstReply := make([]uints.U8, 47)
+
+	arthur.FillNextUnits(firstChallenge)
+	arthur.FillChallengeUnits(firstReply)
+
+	api.Println(firstChallenge)
+	api.Println(firstReply)
 	numOfLeavesProved := len(circuit.Leaves)
+	keccakCount := 0
 
 	for i := 0; i < numOfLeavesProved; i++ {
 		treeHeight := len(circuit.AuthPaths[i]) + 1
@@ -31,6 +47,7 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 
 		keccak.Write(circuit.Leaves[i])
 		claimedLeafHash := keccak.Sum()
+		keccakCount += 1
 		dir := leafIndex[0]
 		// api.Println(dir)
 
@@ -49,6 +66,7 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 		tmp := append(x_leftChild, x_rightChild...)
 		keccak_new.Write(tmp)
 		currentHash := keccak_new.Sum()
+		keccakCount += 1
 
 		// api.Println(currentHash)
 
@@ -73,14 +91,15 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 			keccak, _ := sha3.NewLegacyKeccak256(api)
 			keccak.Write(new_tmp)
 			currentHash = keccak.Sum()
+			keccakCount += 1
 			// api.Println(currentHash)
 		}
 
 		for z := 0; z < 32; z++ {
-			api.AssertIsEqual(currentHash[z].Val, circuit.RootHash[z].Val)
+			api.AssertIsEqual(currentHash[z].Val, rootHash[z].Val)
 		}
 	}
-
+	api.Println(keccakCount)
 	return nil
 }
 
@@ -114,8 +133,7 @@ func toLittleEndianBytes(num uint64) []uint8 {
 	return bytes
 }
 
-func verify_circuit(proofs []ProofElement, roots []KeccakDigest) {
-
+func verify_circuit(proofs []ProofElement, roots []KeccakDigest, io string, transcript [560]uints.U8) {
 	for i := range proofs {
 		// i := 0
 		var numOfLeavesProved = len(proofs[i].A.LeafIndexes)
@@ -123,10 +141,10 @@ func verify_circuit(proofs []ProofElement, roots []KeccakDigest) {
 
 		var authPaths = make([][][]uints.U8, numOfLeavesProved)
 
-		// println(i)
-		// println(numOfLeavesProved)
-		// println("proof len", len(proofs))
-		// println(treeHeight)
+		println(i)
+		println(numOfLeavesProved)
+		println("proof len", len(proofs))
+		println(treeHeight)
 		// fmt.Println(proofs[i].A)
 		// fmt.Println(proofs[i].B)
 		var leaves = make([][]uints.U8, numOfLeavesProved)
@@ -147,6 +165,7 @@ func verify_circuit(proofs []ProofElement, roots []KeccakDigest) {
 		var root_hash = make([]uints.U8, 32)
 
 		var circuit = VerifyMerkleProofCircuit{
+			IO:                []byte(io),
 			Leaves:            leaves,
 			LeafIndexes:       leaf_indexes,
 			LeafSiblingHashes: leaf_sibling_hashes,
@@ -193,6 +212,8 @@ func verify_circuit(proofs []ProofElement, roots []KeccakDigest) {
 		}
 
 		assignment := VerifyMerkleProofCircuit{
+			IO:                []byte(io),
+			Transcript:        transcript,
 			Leaves:            leaves,
 			LeafIndexes:       leaf_indexes,
 			LeafSiblingHashes: leaf_sibling_hashes,
