@@ -1,30 +1,198 @@
 package main
 
 import (
+	"fmt"
+	"math/big"
+	"math/bits"
+
 	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/groth16"
+	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/consensys/gnark/std/hash/sha3"
+	"github.com/consensys/gnark/std/lookup/logderivlookup"
 	"github.com/consensys/gnark/std/math/uints"
 	gnark_nimue "github.com/reilabs/gnark-nimue"
 )
 
 type VerifyMerkleProofCircuit struct {
-	IO            []byte
-	Transcript    [560]uints.U8 `gnark:",public"`
-	FoldingFactor int
 	// Inputs
-	Leaves            [][]uints.U8
-	LeafIndexes       []uints.U8
-	LeafSiblingHashes [][]uints.U8
-	AuthPaths         [][][]uints.U8
+	DomainSize                  int
+	FoldingFactor               int
+	FinalSumcheckRounds         int
+	RoundParametersOODSamples   []int
+	RoundParametersNumOfQueries []int
+	PowBytes                    int
+	FinalPowBytes               int
+	FinalQueries                int
+	Leaves                      [][][]uints.U8
+	LeafIndexes                 [][]uints.U8
+	LeafSiblingHashes           [][][]uints.U8
+	AuthPaths                   [][][][]uints.U8
 	// Public Input
-	RootHash []uints.U8 `gnark:",public"`
+	IO         []byte
+	Transcript [560]uints.U8 `gnark:",public"`
+}
+
+func IndexOf(_ *big.Int, inputs []*big.Int, outputs []*big.Int) error {
+	if len(outputs) != 1 {
+		return fmt.Errorf("expecting one output")
+	}
+
+	if len(inputs) == 0 {
+		return fmt.Errorf("inputs array cannot be empty")
+	}
+
+	target := inputs[0]
+
+	for i := 1; i < len(inputs); i++ {
+		if inputs[i].Cmp(target) == 0 {
+			outputs[0] = big.NewInt(int64(i - 1))
+			return nil
+		}
+	}
+
+	outputs[0] = big.NewInt(-1)
+	return nil
+}
+
+func PoW(api frontend.API, arthur gnark_nimue.Arthur) ([]uints.U8, []uints.U8, error) {
+	challenge := make([]uints.U8, 32)
+	err := arthur.FillChallengeBytes(challenge)
+	if err != nil {
+		return nil, nil, err
+	}
+	nonce := make([]uints.U8, 8)
+	err = arthur.FillNextBytes(nonce)
+	if err != nil {
+		return nil, nil, err
+	}
+	return challenge, nonce, nil
+}
+
+func GetStirChallenges(api frontend.API, circuit VerifyMerkleProofCircuit, arthur gnark_nimue.Arthur, numQueries int, domainSize int) ([]frontend.Variable, error) {
+	foldedDomainSize := domainSize / (1 << circuit.FoldingFactor)
+	domainSizeBytes := (bits.Len(uint(foldedDomainSize*2-1)) - 1 + 7) / 8
+
+	stirQueries := make([]uints.U8, domainSizeBytes*numQueries)
+	api.Println(numQueries * domainSizeBytes)
+	err := arthur.FillChallengeBytes(stirQueries)
+	if err != nil {
+		return nil, err
+	}
+	api.Println(stirQueries)
+	api.Println(foldedDomainSize)
+
+	indexes := make([]frontend.Variable, numQueries)
+
+	bitLength := bits.Len(uint(foldedDomainSize)) - 1
+	api.Println(bitLength)
+
+	for i := range numQueries {
+		tmpRes := frontend.Variable(0)
+		for j := range domainSizeBytes {
+			tmpRes = api.Add(stirQueries[j+i*domainSizeBytes].Val, api.Mul(tmpRes, 256))
+		}
+		bitsOfTmpRes := api.ToBinary(tmpRes)
+		indexes[i] = api.FromBinary(bitsOfTmpRes[0:bitLength]...)
+	}
+	return indexes, nil
+}
+
+func IsSubset(api frontend.API, circuit VerifyMerkleProofCircuit, arthur gnark_nimue.Arthur, indexes []frontend.Variable, merkleIndexes []uints.U8) error {
+	dedupedLUT := logderivlookup.New(api)
+	inputArr := make([]frontend.Variable, len(merkleIndexes)+1)
+
+	for j, index := range merkleIndexes {
+		dedupedLUT.Insert(index.Val)
+		inputArr[1+j] = index.Val
+	}
+
+	for _, x := range indexes {
+		inputArr[0] = x
+		res, newerr := api.Compiler().NewHint(IndexOf, 1, inputArr...)
+		if newerr != nil {
+			return newerr
+		}
+		searchRes := dedupedLUT.Lookup(res[0])
+		api.AssertIsEqual(x, searchRes[0])
+	}
+	return nil
+}
+
+func VerifyMerkleTreeProofs(api frontend.API, leafIndexes []uints.U8, leaves [][]uints.U8, leafSiblingHashes [][]uints.U8, authPaths [][][]uints.U8, rootHash []uints.U8) error {
+	numOfLeavesProved := len(leaves)
+	keccakCount := 0
+
+	for i := 0; i < numOfLeavesProved; i++ {
+		treeHeight := len(authPaths[i]) + 1
+
+		leafIndex := api.ToBinary(leafIndexes[i].Val, treeHeight)
+		leafSiblingHash := leafSiblingHashes[i]
+		keccak, _ := sha3.NewLegacyKeccak256(api)
+
+		keccak.Write(leaves[i])
+		claimedLeafHash := keccak.Sum()
+		keccakCount += 1
+		dir := leafIndex[0]
+		// api.Println(dir)
+
+		x_leftChild := make([]uints.U8, 32)
+		x_rightChild := make([]uints.U8, 32)
+
+		for j := 0; j < 32; j++ {
+			x_leftChild[j].Val = api.Select(dir, leafSiblingHash[j].Val, claimedLeafHash[j].Val)
+			x_rightChild[j].Val = api.Select(dir, claimedLeafHash[j].Val, leafSiblingHash[j].Val)
+		}
+
+		// api.Println(x_leftChild)
+		// api.Println(x_rightChild)
+		keccak_new, _ := sha3.NewLegacyKeccak256(api)
+
+		tmp := append(x_leftChild, x_rightChild...)
+		keccak_new.Write(tmp)
+		currentHash := keccak_new.Sum()
+		keccakCount += 1
+
+		// api.Println(currentHash)
+
+		for level := 1; level < treeHeight; level++ {
+			index := leafIndex[level]
+
+			siblingHash := authPaths[i][level-1]
+
+			dir := api.And(index, 1)
+			left := make([]uints.U8, 32)
+			right := make([]uints.U8, 32)
+
+			for z := 0; z < 32; z++ {
+				left[z].Val = api.Select(dir, siblingHash[z].Val, currentHash[z].Val)
+				right[z].Val = api.Select(dir, currentHash[z].Val, siblingHash[z].Val)
+			}
+
+			// api.Println(left)
+			// api.Println(right)
+
+			new_tmp := append(left, right...)
+			keccak, _ := sha3.NewLegacyKeccak256(api)
+			keccak.Write(new_tmp)
+			currentHash = keccak.Sum()
+			keccakCount += 1
+			// api.Println(currentHash)
+		}
+
+		for z := 0; z < 32; z++ {
+			api.AssertIsEqual(currentHash[z].Val, rootHash[z].Val)
+		}
+	}
+	return nil
 }
 
 func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
-
 	arthur, err := gnark_nimue.NewKeccakArthur(api, circuit.IO, circuit.Transcript[:])
+	domainSize := circuit.DomainSize
 	if err != nil {
 		return err
 	}
@@ -59,6 +227,7 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 	api.Println(rootHash)
 	api.Println(oodQuery)
 	api.Println(oodAnswer)
+	api.Println(combinationRandomnessGenerator)
 
 	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor)
 	for i := 0; i < circuit.FoldingFactor; i++ {
@@ -81,72 +250,119 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 		sumcheckRounds[i][0] = sumcheckPolynomialEvals
 		sumcheckRounds[i][1] = foldingRandomnessSingle
 	}
+	roots := make([][]uints.U8, len(circuit.RoundParametersOODSamples))
 
-	// numOfLeavesProved := len(circuit.Leaves)
-	keccakCount := 0
+	for r := 0; r < len(circuit.RoundParametersOODSamples); r++ {
+		roots[r] = make([]uints.U8, 32)
+		err = arthur.FillNextBytes(roots[r])
+		if err != nil {
+			return err
+		}
+		api.Println(roots)
 
-	// for i := 0; i < numOfLeavesProved; i++ {
-	// 	treeHeight := len(circuit.AuthPaths[i]) + 1
+		err = VerifyMerkleTreeProofs(api, circuit.LeafIndexes[r], circuit.Leaves[r], circuit.LeafSiblingHashes[r], circuit.AuthPaths[r], rootHash)
+		if err != nil {
+			return err
+		}
 
-	// 	leafIndex := api.ToBinary(circuit.LeafIndexes[i].Val, treeHeight)
-	// 	leafSiblingHash := circuit.LeafSiblingHashes[i]
-	// 	keccak, _ := sha3.NewLegacyKeccak256(api)
+		oodPoints := make([]frontend.Variable, circuit.RoundParametersOODSamples[r])
+		oodAnswers := make([]frontend.Variable, circuit.RoundParametersOODSamples[r])
+		if circuit.RoundParametersOODSamples[r] > 0 {
+			err = arthur.FillChallengeScalars(oodPoints)
+			if err != nil {
+				return err
+			}
+			err = arthur.FillNextScalars(oodAnswers)
+			if err != nil {
+				return err
+			}
+			api.Println(oodPoints)
+			api.Println(oodAnswers)
+		}
 
-	// 	keccak.Write(circuit.Leaves[i])
-	// 	claimedLeafHash := keccak.Sum()
-	// 	keccakCount += 1
-	// 	dir := leafIndex[0]
-	// 	// api.Println(dir)
+		indexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[0], domainSize)
+		if err != nil {
+			return err
+		}
 
-	// 	x_leftChild := make([]uints.U8, 32)
-	// 	x_rightChild := make([]uints.U8, 32)
+		err = IsSubset(api, *circuit, arthur, indexes, circuit.LeafIndexes[0])
+		if err != nil {
+			return err
+		}
 
-	// 	for j := 0; j < 32; j++ {
-	// 		x_leftChild[j].Val = api.Select(dir, leafSiblingHash[j].Val, claimedLeafHash[j].Val)
-	// 		x_rightChild[j].Val = api.Select(dir, claimedLeafHash[j].Val, leafSiblingHash[j].Val)
-	// 	}
+		api.Println(circuit.PowBytes)
+		if circuit.PowBytes > 0 {
+			challenge, nonce, err := PoW(api, arthur)
+			if err != nil {
+				return err
+			}
+			api.Println(challenge)
+			api.Println(nonce)
+		}
+		combRandomness := make([]frontend.Variable, 1)
+		err = arthur.FillChallengeScalars(combRandomness)
+		if err != nil {
+			return err
+		}
+		api.Println(combRandomness...)
 
-	// 	// api.Println(x_leftChild)
-	// 	// api.Println(x_rightChild)
-	// 	keccak_new, _ := sha3.NewLegacyKeccak256(api)
+		for i := 0; i < circuit.FoldingFactor; i++ {
+			sumcheckPoly := make([]frontend.Variable, 3)
+			err = arthur.FillNextScalars(sumcheckPoly)
+			if err != nil {
+				return err
+			}
+			api.Println(sumcheckPoly...)
 
-	// 	tmp := append(x_leftChild, x_rightChild...)
-	// 	keccak_new.Write(tmp)
-	// 	currentHash := keccak_new.Sum()
-	// 	keccakCount += 1
+			foldingRandomnessSingle := make([]frontend.Variable, 1)
+			err = arthur.FillChallengeScalars(foldingRandomnessSingle)
+			if err != nil {
+				return err
+			}
+			api.Println(foldingRandomnessSingle...)
+		}
+	}
 
-	// 	// api.Println(currentHash)
+	finalCoefficients := make([]frontend.Variable, 1)
+	err = arthur.FillNextScalars(finalCoefficients)
+	if err != nil {
+		return err
+	}
+	api.Println(finalCoefficients...)
 
-	// 	for level := 1; level < treeHeight; level++ {
-	// 		index := leafIndex[level]
+	domainSize /= 2
+	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize)
+	if err != nil {
+		return nil
+	}
 
-	// 		siblingHash := circuit.AuthPaths[i][level-1]
+	err = IsSubset(api, *circuit, arthur, finalIndexes, circuit.LeafIndexes[len(circuit.LeafIndexes)-1])
+	if err != nil {
+		return err
+	}
+	// api.Println(len(circuit.LeafIndexes) - 1)
+	// api.Println(circuit.LeafIndexes[len(circuit.LeafIndexes)-1])
+	// api.Println(circuit.Leaves[len(circuit.LeafIndexes)-1])
+	// api.Println(circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1])
+	// api.Println(circuit.AuthPaths[len(circuit.LeafIndexes)-1])
+	// api.Println(circuit.RootHash[len(circuit.LeafIndexes)-1])
 
-	// 		dir := api.And(index, 1)
-	// 		left := make([]uints.U8, 32)
-	// 		right := make([]uints.U8, 32)
-
-	// 		for z := 0; z < 32; z++ {
-	// 			left[z].Val = api.Select(dir, siblingHash[z].Val, currentHash[z].Val)
-	// 			right[z].Val = api.Select(dir, currentHash[z].Val, siblingHash[z].Val)
-	// 		}
-
-	// 		// api.Println(left)
-	// 		// api.Println(right)
-
-	// 		new_tmp := append(left, right...)
-	// 		keccak, _ := sha3.NewLegacyKeccak256(api)
-	// 		keccak.Write(new_tmp)
-	// 		currentHash = keccak.Sum()
-	// 		keccakCount += 1
-	// 		// api.Println(currentHash)
-	// 	}
-
-	// 	for z := 0; z < 32; z++ {
-	// 		api.AssertIsEqual(currentHash[z].Val, rootHash[z].Val)
-	// 	}
+	// err = VerifyMerkleTreeProofs(api, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], circuit.Leaves[len(circuit.LeafIndexes)-1], circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1], circuit.AuthPaths[len(circuit.LeafIndexes)-1], roots[0])
+	// if err != nil {
+	// 	return err
 	// }
-	api.Println(keccakCount)
+	if circuit.FinalPowBytes > 0 {
+		finalChallenge, finalNonce, err := PoW(api, arthur)
+		if err != nil {
+			return err
+		}
+		api.Println(finalChallenge)
+		api.Println(finalNonce)
+	}
+
+	// for i := 0; i < circuit.FinalSumcheckRounds; i++ {
+	// }
+
 	return nil
 }
 
@@ -180,69 +396,67 @@ func toLittleEndianBytes(num uint64) []uint8 {
 	return bytes
 }
 
-func verify_circuit(proofs []ProofElement, roots []KeccakDigest, io string, transcript [560]uints.U8) {
+func verify_circuit(proofs []ProofElement, io string, transcript [560]uints.U8) {
+	var totalAuthPath = make([][][][]uints.U8, len(proofs))
+	var totalLeaves = make([][][]uints.U8, len(proofs))
+	var totalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
+	var totalLeafIndexes = make([][]uints.U8, len(proofs))
+
+	var containerTotalAuthPath = make([][][][]uints.U8, len(proofs))
+	var containerTotalLeaves = make([][][]uints.U8, len(proofs))
+	var containerTotalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
+	var containerTotalLeafIndexes = make([][]uints.U8, len(proofs))
 	for i := range proofs {
 		// i := 0
 		var numOfLeavesProved = len(proofs[i].A.LeafIndexes)
 		var treeHeight = len(proofs[i].A.AuthPathsSuffixes[0])
 
-		var authPaths = make([][][]uints.U8, numOfLeavesProved)
-
+		totalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
+		containerTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
 		println(i)
 		println(numOfLeavesProved)
-		println("proof len", len(proofs))
 		println(treeHeight)
-		// fmt.Println(proofs[i].A)
-		// fmt.Println(proofs[i].B)
-		var leaves = make([][]uints.U8, numOfLeavesProved)
-		var leaf_sibling_hashes = make([][]uints.U8, numOfLeavesProved)
+		totalLeaves[i] = make([][]uints.U8, numOfLeavesProved)
+		containerTotalLeaves[i] = make([][]uints.U8, numOfLeavesProved)
+		totalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
+		containerTotalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
 
 		for j := 0; j < numOfLeavesProved; j++ {
-			authPaths[j] = make([][]uints.U8, treeHeight)
+			totalAuthPath[i][j] = make([][]uints.U8, treeHeight)
+			containerTotalAuthPath[i][j] = make([][]uints.U8, treeHeight)
 
 			for z := 0; z < treeHeight; z++ {
-				authPaths[j][z] = make([]uints.U8, 32)
+				totalAuthPath[i][j][z] = make([]uints.U8, 32)
+				containerTotalAuthPath[i][j][z] = make([]uints.U8, 32)
 			}
-			leaves[j] = make([]uints.U8, 136)
-			leaf_sibling_hashes[j] = make([]uints.U8, 32)
+			totalLeaves[i][j] = make([]uints.U8, 136)
+			containerTotalLeaves[i][j] = make([]uints.U8, 136)
+			totalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
+			containerTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
 		}
 
-		var leaf_indexes = make([]uints.U8, numOfLeavesProved)
-
-		var root_hash = make([]uints.U8, 32)
-
-		var circuit = VerifyMerkleProofCircuit{
-			IO:                []byte(io),
-			Leaves:            leaves,
-			FoldingFactor:     2,
-			LeafIndexes:       leaf_indexes,
-			LeafSiblingHashes: leaf_sibling_hashes,
-			AuthPaths:         authPaths,
-			RootHash:          root_hash,
-		}
-
-		ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
-		pk, vk, _ := groth16.Setup(ccs)
+		containerTotalLeafIndexes[i] = make([]uints.U8, numOfLeavesProved)
 
 		var authPathsTemp = make([][]KeccakDigest, numOfLeavesProved)
 		var prevPath = proofs[i].A.AuthPathsSuffixes[0]
 		authPathsTemp[0] = reverse(prevPath)
 
-		for j := 0; j < len(authPaths[0]); j++ {
-			authPaths[0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
+		for j := 0; j < len(totalAuthPath[i][0]); j++ {
+			totalAuthPath[i][0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
 		}
 
 		for j := 1; j < numOfLeavesProved; j++ {
 			prevPath = prefixDecodePath(prevPath, proofs[i].A.AuthPathsPrefixLengths[j], proofs[i].A.AuthPathsSuffixes[j])
 			authPathsTemp[j] = reverse(prevPath)
 			for z := 0; z < treeHeight; z++ {
-				authPaths[j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
+				totalAuthPath[i][j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
 			}
 		}
+		totalLeafIndexes[i] = make([]uints.U8, numOfLeavesProved)
 
 		for z := range numOfLeavesProved {
-			leaf_sibling_hashes[z] = uints.NewU8Array(proofs[i].A.LeafSiblingHashes[z].KeccakDigest[:])
-			leaf_indexes[z] = uints.NewU8(uint8(proofs[i].A.LeafIndexes[z]))
+			totalLeafSiblingHashes[i][z] = uints.NewU8Array(proofs[i].A.LeafSiblingHashes[z].KeccakDigest[:])
+			totalLeafIndexes[i][z] = uints.NewU8(uint8(proofs[i].A.LeafIndexes[z]))
 			big_output := make([]uint8, 136)
 			copy(big_output[0:8], toLittleEndianBytes(4))
 
@@ -256,23 +470,48 @@ func verify_circuit(proofs []ProofElement, roots []KeccakDigest, io string, tran
 				}
 				copy(big_output[j*32+8:(j+1)*32+8], output)
 			}
-			leaves[z] = uints.NewU8Array(big_output)
+			totalLeaves[i][z] = uints.NewU8Array(big_output)
 		}
-
-		assignment := VerifyMerkleProofCircuit{
-			IO:                []byte(io),
-			Transcript:        transcript,
-			FoldingFactor:     2,
-			Leaves:            leaves,
-			LeafIndexes:       leaf_indexes,
-			LeafSiblingHashes: leaf_sibling_hashes,
-			AuthPaths:         authPaths,
-			RootHash:          uints.NewU8Array(roots[i].KeccakDigest[:]),
-		}
-
-		witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
-		publicWitness, _ := witness.Public()
-		proof, _ := groth16.Prove(ccs, pk, witness)
-		groth16.Verify(proof, vk, publicWitness)
 	}
+
+	var circuit = VerifyMerkleProofCircuit{
+		IO:                          []byte(io),
+		RoundParametersOODSamples:   []int{1},
+		RoundParametersNumOfQueries: []int{98, 49},
+		DomainSize:                  32,
+		FoldingFactor:               2,
+		FinalSumcheckRounds:         0,
+		PowBytes:                    2,
+		FinalPowBytes:               2,
+		FinalQueries:                49,
+		Leaves:                      containerTotalLeaves,
+		LeafIndexes:                 containerTotalLeafIndexes,
+		LeafSiblingHashes:           containerTotalLeafSiblingHashes,
+		AuthPaths:                   containerTotalAuthPath,
+	}
+
+	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	pk, vk, _ := groth16.Setup(ccs)
+
+	assignment := VerifyMerkleProofCircuit{
+		IO:                          []byte(io),
+		Transcript:                  transcript,
+		DomainSize:                  32,
+		FoldingFactor:               2,
+		PowBytes:                    2,
+		FinalPowBytes:               2,
+		FinalSumcheckRounds:         0,
+		RoundParametersOODSamples:   []int{1},
+		RoundParametersNumOfQueries: []int{98, 49},
+		FinalQueries:                49,
+		Leaves:                      totalLeaves,
+		LeafIndexes:                 totalLeafIndexes,
+		LeafSiblingHashes:           totalLeafSiblingHashes,
+		AuthPaths:                   totalAuthPath,
+	}
+
+	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+	publicWitness, _ := witness.Public()
+	proof, _ := groth16.Prove(ccs, pk, witness, backend.WithSolverOptions(solver.WithHints(IndexOf)))
+	groth16.Verify(proof, vk, publicWitness)
 }

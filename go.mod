@@ -5,7 +5,7 @@ go 1.23.3
 require (
 	github.com/consensys/gnark v0.11.0
 	github.com/consensys/gnark-crypto v0.14.0
-	github.com/reilabs/gnark-nimue v0.0.1
+	github.com/reilabs/gnark-nimue v0.0.2
 	github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3
 )
 

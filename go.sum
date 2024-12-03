@@ -49,6 +49,8 @@ github.com/reilabs/gnark-nimue v0.0.0 h1:ZiCGpGCSZR1tsAuxdiuxsvx/cBHXmckg6HtDTBG
 github.com/reilabs/gnark-nimue v0.0.0/go.mod h1:6jzwTf/3lBhncjHjsn3JIyVGu5oWbNMI7A6zlDJwGK0=
 github.com/reilabs/gnark-nimue v0.0.1 h1:wAqRsnbZbCT/wTgZL3oRK4p9XlULTIAumSYc5Ac0whs=
 github.com/reilabs/gnark-nimue v0.0.1/go.mod h1:6jzwTf/3lBhncjHjsn3JIyVGu5oWbNMI7A6zlDJwGK0=
+github.com/reilabs/gnark-nimue v0.0.2 h1:m1dHQpDwq2vPKf8qLxrYErK6sdZN888VB2cIo1T9dEk=
+github.com/reilabs/gnark-nimue v0.0.2/go.mod h1:6jzwTf/3lBhncjHjsn3JIyVGu5oWbNMI7A6zlDJwGK0=
 github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3 h1:EZA/mA0ju0eAsvcBADuKRPYSL1UYoeGCAM/vNEWeCoA=
 github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3/go.mod h1:o5H86RiZONz84eiTtg6HzZpg3M/xvAHqTyAOXRzbmmI=
 github.com/ronanh/intcomp v1.1.0 h1:i54kxmpmSoOZFcWPMWryuakN0vLxLswASsGa07zkvLU=
