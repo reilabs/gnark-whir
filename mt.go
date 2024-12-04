@@ -340,17 +340,11 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 	if err != nil {
 		return err
 	}
-	// api.Println(len(circuit.LeafIndexes) - 1)
-	// api.Println(circuit.LeafIndexes[len(circuit.LeafIndexes)-1])
-	// api.Println(circuit.Leaves[len(circuit.LeafIndexes)-1])
-	// api.Println(circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1])
-	// api.Println(circuit.AuthPaths[len(circuit.LeafIndexes)-1])
-	// api.Println(circuit.RootHash[len(circuit.LeafIndexes)-1])
 
-	// err = VerifyMerkleTreeProofs(api, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], circuit.Leaves[len(circuit.LeafIndexes)-1], circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1], circuit.AuthPaths[len(circuit.LeafIndexes)-1], roots[0])
-	// if err != nil {
-	// 	return err
-	// }
+	err = VerifyMerkleTreeProofs(api, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], circuit.Leaves[len(circuit.LeafIndexes)-1], circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1], circuit.AuthPaths[len(circuit.LeafIndexes)-1], roots[0])
+	if err != nil {
+		return err
+	}
 	if circuit.FinalPowBytes > 0 {
 		finalChallenge, finalNonce, err := PoW(api, arthur)
 		if err != nil {
@@ -406,8 +400,8 @@ func verify_circuit(proofs []ProofElement, io string, transcript [560]uints.U8) 
 	var containerTotalLeaves = make([][][]uints.U8, len(proofs))
 	var containerTotalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
 	var containerTotalLeafIndexes = make([][]uints.U8, len(proofs))
+
 	for i := range proofs {
-		// i := 0
 		var numOfLeavesProved = len(proofs[i].A.LeafIndexes)
 		var treeHeight = len(proofs[i].A.AuthPathsSuffixes[0])
 
