@@ -268,8 +268,6 @@ func checkMainRounds(api frontend.API, circuit *VerifyMerkleProofCircuit, sumche
 	computedFolds := ComputeFolds(api, circuit, sumcheckRounds, finalFoldingRandomness)
 	// api.Println(computedFolds)
 	for r := 0; r < len(circuit.RoundParametersOODSamples); r++ {
-		api.Println(sumcheckPolynomials[r])
-		api.Println(finalFoldingRandomness[r])
 
 		// api.Println(oodAnswersList[r])
 		values := make([]frontend.Variable, len(computedFolds[r])+1)
@@ -290,6 +288,11 @@ func checkMainRounds(api frontend.API, circuit *VerifyMerkleProofCircuit, sumche
 		api.Println(claimedSum)
 
 		checkSumOverBool(api, claimedSum, sumcheckPolynomials[r])
+
+		for i := 1; i < len(sumcheckPolynomials); i++ {
+			eval := evaluateFunction(api, sumcheckPolynomials[i-1], finalFoldingRandomness[i-1])
+			checkSumOverBool(api, eval, sumcheckPolynomials[i])
+		}
 	}
 	// firstSumcheckOfARound(api, circuit, circuit.RoundParametersOODSamples)
 
