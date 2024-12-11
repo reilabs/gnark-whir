@@ -30,51 +30,50 @@ func initializeSpongeWithIOPatternAndMerkleRoot(circuit *Circuit, api frontend.A
 	return mainSponge
 }
 
-func checkFirstSumcheckOfFirstRound(mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API) {
-	mainSponge.Absorb(circuit.First_OOD_Answer)
-	initialCombinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-	plugInEvaluation := api.Add(
-		typeConverters.LittleEndian(api, circuit.First_OOD_Answer),
-		api.Mul(initialCombinationRandomness, circuit.Evaluation),
-	)
-	checkSumOverBool(api, plugInEvaluation, circuit.SumcheckPolysAsEvals[0])
-}
+// func checkFirstSumcheckOfFirstRound(mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API, firstOODAnswer []frontend.Variable) {
+// 	initialCombinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+// 	plugInEvaluation := api.Add(
+// 		typeConverters.LittleEndian(api, firstOODAnswer),
+// 		api.Mul(initialCombinationRandomness, circuit.Evaluation),
+// 	)
+// 	checkSumOverBool(api, plugInEvaluation, circuit.SumcheckPolysAsEvals[0])
+// }
 
-func evaluateFunction(api frontend.API, evaluationsAsBytes [][]frontend.Variable, point frontend.Variable) (ans frontend.Variable) {
-	evaluations := typeConverters.LittleEndianArr(api, evaluationsAsBytes)
-	inv2 := api.Inverse(2)
-	b0 := evaluations[0]
-	b1 := api.Mul(api.Add(api.Neg(evaluations[2]), api.Mul(4, evaluations[1]), api.Mul(-3, evaluations[0])), inv2)
-	b2 := api.Mul(api.Add(evaluations[2], api.Mul(-2, evaluations[1]), evaluations[0]), inv2)
-	return api.Add(api.Mul(point, point, b2), api.Mul(point, b1), b0)
-}
+// func evaluateFunction(api frontend.API, evaluationsAsBytes [][]frontend.Variable, point frontend.Variable) (ans frontend.Variable) {
+// 	evaluations := typeConverters.LittleEndianArr(api, evaluationsAsBytes)
+// 	inv2 := api.Inverse(2)
+// 	b0 := evaluations[0]
+// 	b1 := api.Mul(api.Add(api.Neg(evaluations[2]), api.Mul(4, evaluations[1]), api.Mul(-3, evaluations[0])), inv2)
+// 	b2 := api.Mul(api.Add(evaluations[2], api.Mul(-2, evaluations[1]), evaluations[0]), inv2)
+// 	return api.Add(api.Mul(point, point, b2), api.Mul(point, b1), b0)
+// }
 
-func checkSumOverBool(api frontend.API, value frontend.Variable, polyEvals [][]frontend.Variable) {
-	sumOverBools := api.Add(
-		typeConverters.LittleEndian(api, polyEvals[0]),
-		typeConverters.LittleEndian(api, polyEvals[1]),
-	)
-	api.AssertIsEqual(value, sumOverBools)
-}
+// func checkSumOverBool(api frontend.API, value frontend.Variable, polyEvals [][]frontend.Variable) {
+// 	sumOverBools := api.Add(
+// 		typeConverters.LittleEndian(api, polyEvals[0]),
+// 		typeConverters.LittleEndian(api, polyEvals[1]),
+// 	)
+// 	api.AssertIsEqual(value, sumOverBools)
+// }
 
-func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
-	checkFirstSumcheckOfFirstRound(mainSponge, circuit, api)
-	mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
-	foldingRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-	for i := 1; i < circuit.FoldingParameter; i++ {
-		randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness)
-		checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
-		mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
-		foldingRandomness = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-	}
-}
+// func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
+// 	checkFirstSumcheckOfFirstRound(mainSponge, circuit, api, circuit.First_OOD_Answer)
+// 	mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
+// 	foldingRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+// 	for i := 1; i < circuit.FoldingParameter; i++ {
+// 		randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness)
+// 		checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
+// 		mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
+// 		foldingRandomness = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
+// 	}
+// }
 
-func (circuit *Circuit) Define(api frontend.API) error {
-	mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
-	initialSumcheck(api, circuit, mainSponge)
-	// api.AssertIsEqual(foldingRandomness2, 0)
-	return nil
-}
+// func (circuit *Circuit) Define(api frontend.API) error {
+// 	mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
+// 	initialSumcheck(api, circuit, mainSponge)
+// 	// api.AssertIsEqual(foldingRandomness2, 0)
+// 	return nil
+// }
 
 type KeccakDigest struct {
 	KeccakDigest [32]uint8
@@ -118,7 +117,6 @@ func main() {
 	for i := range transcriptBytes {
 		transcript[i] = uints.NewU8(transcriptBytes[i])
 	}
-	// transcript := [560]uints.U8{uints.NewU8Array(transcriptBytes[:])}
 
 	verify_circuit(x, IOPat, transcript)
 }
