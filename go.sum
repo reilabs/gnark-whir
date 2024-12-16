@@ -37,8 +37,10 @@ github.com/mmcloughlin/profile v0.1.1/go.mod h1:IhHD7q1ooxgwTgjxQYkACGA77oFTDdFV
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/reilabs/gnark-nimue v0.0.2 h1:m1dHQpDwq2vPKf8qLxrYErK6sdZN888VB2cIo1T9dEk=
-github.com/reilabs/gnark-nimue v0.0.2/go.mod h1:6jzwTf/3lBhncjHjsn3JIyVGu5oWbNMI7A6zlDJwGK0=
+github.com/reilabs/gnark-nimue v0.0.4 h1:SpOt/Py+nOwfsmtnSqiM59M1PyHS3qgL7Zgl77ugw7E=
+github.com/reilabs/gnark-nimue v0.0.4/go.mod h1:HZvEohNWtV3PHogGBe2HziYXX0CetYPxfLapf5NW6ss=
+github.com/reilabs/gnark-skyscraper v0.0.0-20241203164459-07cdbaf96dc3 h1:ZDD1xCjaYJwQNRGCokPGFZUEnrsuy2kxSjkSsPKLhxY=
+github.com/reilabs/gnark-skyscraper v0.0.0-20241203164459-07cdbaf96dc3/go.mod h1:DNZzTzHHeHeBsMWkDRJFkK1T1p5HrAicpSOS05mGHa8=
 github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3 h1:EZA/mA0ju0eAsvcBADuKRPYSL1UYoeGCAM/vNEWeCoA=
 github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3/go.mod h1:o5H86RiZONz84eiTtg6HzZpg3M/xvAHqTyAOXRzbmmI=
 github.com/ronanh/intcomp v1.1.0 h1:i54kxmpmSoOZFcWPMWryuakN0vLxLswASsGa07zkvLU=

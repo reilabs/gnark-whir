@@ -19,51 +19,6 @@ type Circuit struct {
 	FoldingParameter     int
 }
 
-// func checkFirstSumcheckOfFirstRound(mainSponge *keccakSponge.Digest, circuit *Circuit, api frontend.API, firstOODAnswer []frontend.Variable) {
-// 	initialCombinationRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-// 	plugInEvaluation := api.Add(
-// 		typeConverters.LittleEndian(api, firstOODAnswer),
-// 		api.Mul(initialCombinationRandomness, circuit.Evaluation),
-// 	)
-// 	checkSumOverBool(api, plugInEvaluation, circuit.SumcheckPolysAsEvals[0])
-// }
-
-// func evaluateFunction(api frontend.API, evaluationsAsBytes [][]frontend.Variable, point frontend.Variable) (ans frontend.Variable) {
-// 	evaluations := typeConverters.LittleEndianArr(api, evaluationsAsBytes)
-// 	inv2 := api.Inverse(2)
-// 	b0 := evaluations[0]
-// 	b1 := api.Mul(api.Add(api.Neg(evaluations[2]), api.Mul(4, evaluations[1]), api.Mul(-3, evaluations[0])), inv2)
-// 	b2 := api.Mul(api.Add(evaluations[2], api.Mul(-2, evaluations[1]), evaluations[0]), inv2)
-// 	return api.Add(api.Mul(point, point, b2), api.Mul(point, b1), b0)
-// }
-
-// func checkSumOverBool(api frontend.API, value frontend.Variable, polyEvals [][]frontend.Variable) {
-// 	sumOverBools := api.Add(
-// 		typeConverters.LittleEndian(api, polyEvals[0]),
-// 		typeConverters.LittleEndian(api, polyEvals[1]),
-// 	)
-// 	api.AssertIsEqual(value, sumOverBools)
-// }
-
-// func initialSumcheck(api frontend.API, circuit *Circuit, mainSponge *keccakSponge.Digest) {
-// 	checkFirstSumcheckOfFirstRound(mainSponge, circuit, api, circuit.First_OOD_Answer)
-// 	mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[0])
-// 	foldingRandomness := typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-// 	for i := 1; i < circuit.FoldingParameter; i++ {
-// 		randEval := evaluateFunction(api, circuit.SumcheckPolysAsEvals[i-1], foldingRandomness)
-// 		checkSumOverBool(api, randEval, circuit.SumcheckPolysAsEvals[i])
-// 		mainSponge.AbsorbQuadraticPolynomial(circuit.SumcheckPolysAsEvals[i])
-// 		foldingRandomness = typeConverters.BigEndian(api, mainSponge.Squeeze(47))
-// 	}
-// }
-
-// func (circuit *Circuit) Define(api frontend.API) error {
-// 	mainSponge := initializeSpongeWithIOPatternAndMerkleRoot(circuit, api)
-// 	initialSumcheck(api, circuit, mainSponge)
-// 	// api.AssertIsEqual(foldingRandomness2, 0)
-// 	return nil
-// }
-
 type KeccakDigest struct {
 	KeccakDigest [32]uint8
 }
@@ -94,12 +49,12 @@ func main() {
 	var x []ProofElement
 	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
 
-	IOPat := "🌪\ufe0f\u0000A32merkle_digest\u0000S47ood_query\u0000A32ood_ans\u0000S47initial_combination_randomness\u0000A96sumcheck_poly\u0000S47folding_randomness\u0000A96sumcheck_poly\u0000S47folding_randomness\u0000A32merkle_digest\u0000S47ood_query\u0000A32ood_ans\u0000S97stir_queries\u0000S32pow_queries\u0000A8pow-nonce\u0000S47combination_randomness\u0000A96sumcheck_poly\u0000S47folding_randomness\u0000A96sumcheck_poly\u0000S47folding_randomness\u0000A64final_coeffs\u0000S49final_queries\u0000S32pow_queries\u0000A8pow-nonce\u0000A96sumcheck_poly\u0000S47folding_randomness"
+	IOPat := "🌪\ufe0f\u0000A1merkle_digest\u0000S1ood_query\u0000A1ood_ans\u0000S1initial_combination_randomness\u0000A3sumcheck_poly\u0000S1folding_randomness\u0000A3sumcheck_poly\u0000S1folding_randomness\u0000A1merkle_digest\u0000S1ood_query\u0000A1ood_ans\u0000S7stir_queries\u0000S3pow_queries\u0000A8pow-nonce\u0000S1combination_randomness\u0000A3sumcheck_poly\u0000S1folding_randomness\u0000A3sumcheck_poly\u0000S1folding_randomness\u0000A2final_coeffs\u0000S4final_queries\u0000S3pow_queries\u0000A8pow-nonce\u0000A3sumcheck_poly\u0000S1folding_randomness"
 	io := gnark_nimue.IOPattern{}
 	_ = io.Parse([]byte(IOPat))
 	fmt.Printf("io: %s\n", io.PPrint())
 
-	transcriptBytes := [688]byte{20, 73, 22, 35, 151, 190, 200, 31, 82, 241, 219, 131, 37, 65, 199, 71, 35, 103, 244, 180, 95, 57, 12, 88, 150, 240, 130, 33, 169, 213, 157, 19, 87, 163, 148, 126, 140, 88, 197, 212, 188, 129, 23, 220, 46, 199, 151, 114, 223, 197, 223, 6, 169, 228, 161, 59, 69, 123, 142, 247, 77, 81, 186, 6, 133, 213, 238, 190, 187, 253, 113, 24, 62, 228, 19, 207, 110, 171, 67, 156, 118, 99, 146, 13, 254, 133, 226, 16, 146, 96, 53, 40, 92, 153, 116, 39, 211, 205, 165, 175, 100, 80, 53, 0, 16, 14, 189, 134, 8, 4, 136, 254, 197, 186, 206, 122, 97, 164, 15, 227, 220, 186, 138, 176, 100, 6, 170, 15, 196, 234, 177, 239, 19, 102, 227, 18, 183, 184, 49, 103, 154, 37, 183, 95, 216, 208, 238, 161, 25, 70, 121, 214, 28, 79, 87, 168, 212, 127, 38, 14, 133, 104, 209, 29, 250, 193, 243, 37, 179, 19, 214, 103, 16, 154, 102, 214, 59, 226, 147, 134, 28, 122, 250, 78, 191, 130, 55, 226, 48, 178, 230, 9, 219, 45, 169, 174, 79, 58, 59, 197, 9, 68, 166, 148, 243, 57, 192, 104, 125, 251, 211, 34, 73, 111, 65, 6, 198, 13, 45, 9, 107, 150, 70, 41, 221, 53, 72, 229, 13, 217, 182, 127, 171, 203, 70, 204, 0, 32, 57, 30, 185, 89, 102, 126, 232, 237, 50, 198, 92, 110, 12, 90, 173, 38, 246, 19, 225, 76, 186, 246, 248, 221, 226, 16, 124, 218, 253, 49, 186, 200, 11, 168, 110, 247, 235, 33, 25, 98, 207, 115, 93, 215, 12, 199, 131, 248, 170, 3, 21, 76, 40, 227, 117, 206, 60, 107, 85, 14, 57, 50, 14, 164, 126, 103, 145, 236, 66, 99, 125, 60, 178, 116, 166, 36, 148, 8, 242, 158, 170, 27, 0, 0, 0, 0, 0, 0, 0, 10, 232, 60, 136, 148, 57, 254, 71, 217, 205, 181, 115, 54, 79, 184, 57, 106, 95, 152, 24, 100, 115, 58, 225, 156, 147, 168, 190, 86, 217, 178, 2, 14, 70, 228, 29, 191, 110, 1, 120, 163, 67, 161, 65, 155, 172, 65, 157, 0, 224, 168, 63, 201, 241, 167, 234, 21, 109, 64, 69, 74, 253, 51, 20, 6, 157, 218, 229, 123, 229, 13, 7, 229, 235, 160, 132, 179, 98, 85, 36, 228, 5, 138, 58, 155, 140, 250, 224, 233, 173, 178, 21, 225, 9, 187, 206, 24, 147, 68, 31, 212, 103, 59, 61, 17, 34, 229, 20, 55, 56, 4, 76, 55, 94, 128, 167, 237, 157, 115, 209, 119, 82, 235, 54, 161, 244, 156, 30, 16, 200, 162, 24, 131, 167, 177, 1, 217, 144, 52, 72, 175, 222, 156, 101, 133, 121, 221, 57, 78, 66, 65, 238, 67, 130, 90, 227, 35, 65, 44, 206, 35, 226, 81, 213, 196, 136, 82, 86, 250, 4, 169, 212, 60, 109, 248, 58, 203, 206, 86, 53, 52, 17, 107, 2, 207, 4, 176, 244, 115, 19, 20, 126, 16, 154, 128, 211, 153, 25, 1, 132, 50, 152, 194, 84, 200, 161, 141, 131, 176, 3, 162, 232, 50, 48, 130, 35, 106, 194, 29, 24, 25, 145, 96, 62, 1, 0, 36, 112, 231, 118, 9, 36, 152, 86, 131, 121, 17, 143, 34, 132, 164, 40, 44, 172, 98, 75, 4, 67, 192, 218, 62, 176, 240, 1, 210, 253, 6, 0, 0, 0, 0, 0, 0, 0, 11, 220, 194, 197, 1, 206, 95, 45, 198, 151, 3, 150, 54, 0, 184, 19, 73, 187, 221, 54, 179, 104, 194, 200, 187, 18, 103, 94, 156, 142, 183, 247, 1, 225, 19, 237, 96, 115, 21, 185, 23, 131, 134, 47, 98, 213, 176, 95, 104, 80, 43, 58, 243, 166, 56, 118, 196, 248, 101, 35, 211, 123, 216, 142, 39, 36, 180, 226, 149, 250, 61, 204, 236, 123, 156, 119, 120, 12, 92, 8, 52, 148, 25, 123, 246, 66, 180, 165, 178, 194, 26, 187, 78, 163, 24, 211, 30}
+	transcriptBytes := [688]byte{110, 211, 95, 239, 223, 215, 8, 132, 125, 44, 231, 116, 26, 217, 204, 232, 167, 18, 76, 66, 184, 91, 20, 145, 109, 127, 62, 47, 114, 255, 32, 4, 97, 231, 74, 31, 22, 179, 54, 104, 230, 65, 227, 215, 50, 254, 8, 65, 253, 183, 24, 213, 132, 235, 161, 165, 215, 148, 8, 202, 232, 155, 225, 10, 27, 86, 149, 12, 132, 5, 141, 142, 175, 232, 220, 5, 178, 31, 48, 163, 46, 156, 30, 90, 239, 227, 163, 195, 96, 181, 125, 126, 68, 29, 164, 26, 71, 145, 181, 2, 38, 163, 139, 29, 200, 201, 191, 75, 201, 198, 12, 198, 43, 116, 123, 252, 75, 77, 78, 154, 160, 127, 188, 44, 23, 205, 161, 32, 200, 106, 149, 164, 180, 163, 24, 228, 28, 181, 155, 93, 148, 6, 65, 10, 215, 172, 120, 43, 42, 180, 248, 53, 239, 38, 149, 144, 242, 187, 131, 39, 152, 161, 136, 247, 39, 175, 146, 200, 166, 204, 24, 98, 30, 13, 67, 215, 137, 193, 63, 240, 165, 174, 68, 202, 32, 84, 153, 79, 137, 215, 151, 46, 251, 62, 32, 193, 4, 221, 82, 154, 204, 252, 173, 83, 37, 63, 146, 150, 46, 80, 216, 50, 72, 95, 64, 63, 66, 233, 243, 36, 35, 213, 25, 38, 179, 131, 29, 133, 137, 237, 136, 132, 246, 202, 71, 133, 48, 229, 116, 180, 110, 1, 64, 2, 172, 222, 71, 151, 242, 21, 249, 24, 28, 242, 204, 32, 148, 16, 48, 206, 38, 93, 120, 22, 233, 197, 171, 195, 119, 54, 178, 192, 84, 117, 152, 42, 240, 210, 70, 43, 252, 227, 222, 226, 73, 147, 8, 37, 76, 29, 104, 79, 59, 66, 45, 71, 159, 106, 166, 90, 223, 124, 251, 41, 71, 161, 168, 175, 200, 107, 187, 7, 7, 69, 202, 195, 120, 132, 204, 22, 0, 0, 0, 0, 0, 0, 0, 19, 3, 138, 250, 164, 68, 86, 9, 8, 58, 66, 236, 24, 194, 47, 182, 154, 42, 76, 170, 126, 54, 206, 123, 74, 127, 20, 180, 46, 190, 101, 127, 29, 229, 25, 6, 5, 252, 191, 168, 85, 157, 215, 12, 49, 9, 207, 30, 111, 139, 121, 129, 21, 200, 108, 42, 252, 86, 186, 22, 124, 229, 55, 169, 6, 7, 214, 36, 32, 59, 110, 74, 186, 165, 95, 166, 149, 143, 166, 243, 59, 99, 171, 58, 81, 248, 210, 232, 47, 52, 152, 164, 214, 164, 76, 64, 31, 104, 125, 2, 184, 78, 132, 201, 39, 2, 122, 103, 137, 19, 24, 16, 190, 84, 246, 132, 96, 60, 167, 211, 131, 121, 129, 193, 44, 79, 91, 193, 4, 7, 178, 63, 12, 188, 2, 191, 153, 47, 138, 7, 118, 185, 16, 189, 92, 28, 177, 193, 149, 235, 163, 215, 61, 212, 16, 104, 215, 179, 58, 70, 32, 176, 18, 15, 91, 30, 102, 77, 234, 203, 206, 142, 73, 119, 215, 222, 65, 84, 252, 67, 7, 225, 31, 23, 198, 82, 35, 174, 165, 102, 72, 209, 47, 68, 180, 178, 211, 154, 231, 207, 227, 120, 135, 79, 221, 19, 67, 246, 124, 177, 241, 102, 130, 105, 200, 215, 52, 78, 76, 20, 63, 23, 252, 2, 44, 192, 85, 116, 251, 143, 187, 149, 252, 45, 22, 90, 80, 254, 167, 106, 127, 36, 162, 86, 177, 73, 114, 137, 182, 120, 247, 69, 94, 159, 227, 105, 0, 0, 0, 0, 0, 0, 0, 0, 11, 96, 17, 161, 233, 103, 115, 162, 15, 69, 38, 207, 4, 205, 99, 204, 92, 226, 151, 121, 108, 1, 227, 14, 151, 114, 239, 38, 226, 27, 14, 57, 39, 108, 252, 233, 145, 124, 97, 18, 74, 143, 12, 145, 3, 206, 202, 215, 163, 192, 209, 78, 184, 138, 96, 252, 21, 197, 31, 244, 173, 218, 28, 54, 8, 59, 10, 110, 20, 143, 247, 226, 219, 130, 250, 158, 64, 222, 102, 82, 144, 199, 50, 128, 3, 1, 93, 197, 94, 245, 107, 190, 166, 83, 4, 96, 3}
 	println(len(transcriptBytes))
 	transcript := [688]uints.U8{}
 
