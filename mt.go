@@ -75,13 +75,13 @@ func PoW(api frontend.API, arthur gnark_nimue.Arthur) ([]uints.U8, []uints.U8, e
 	if err != nil {
 		return nil, nil, err
 	}
-	api.Println(challenge)
+	// api.Println(challenge)
 	nonce := make([]uints.U8, 8)
 	err = arthur.FillNextBytes(nonce)
 	if err != nil {
 		return nil, nil, err
 	}
-	api.Println(nonce)
+	// api.Println(nonce)
 	return challenge, nonce, nil
 }
 
@@ -89,15 +89,13 @@ func GetStirChallenges(api frontend.API, circuit VerifyMerkleProofCircuit, arthu
 	foldedDomainSize := domainSize / (1 << circuit.FoldingFactor)
 	domainSizeBytes := (bits.Len(uint(foldedDomainSize*2-1)) - 1 + 7) / 8
 	stirQueries := make([]uints.U8, domainSizeBytes*numQueries)
-	api.Println(domainSizeBytes * numQueries)
+	// api.Println(domainSizeBytes * numQueries)
 	err := arthur.FillChallengeBytes(stirQueries)
 	if err != nil {
 		return nil, err
 	}
-	// api.Println(stirQueries)
 	indexes := make([]frontend.Variable, numQueries)
 	bitLength := bits.Len(uint(foldedDomainSize)) - 1
-	// api.Println(bitLength)
 
 	for i := range numQueries {
 		tmpRes := frontend.Variable(0)
@@ -128,7 +126,6 @@ func IsSubset(api frontend.API, uapi *uints.BinaryField[uints.U64], circuit Veri
 		searchRes := dedupedLUT.Lookup(res[0])
 		api.AssertIsEqual(x, searchRes[0])
 	}
-	api.Println(inputArr...)
 	return nil
 }
 
@@ -224,9 +221,9 @@ func initialSumcheck(api frontend.API, circuit *VerifyMerkleProofCircuit, firstO
 
 func checkMainRounds(api frontend.API, circuit *VerifyMerkleProofCircuit, sumcheckRounds [][][]frontend.Variable, sumcheckPolynomials [][][]frontend.Variable, finalFoldingRandomness [][]frontend.Variable, oodPointsList [][]frontend.Variable, oodAnswersList [][]frontend.Variable, combinationRandomness [][]frontend.Variable, finalCoefficients []frontend.Variable, finalRandomnessPoints []frontend.Variable, initialOODQueries []frontend.Variable, initialCombinationRandomness []frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable, finalSumcheckRounds [][][]frontend.Variable) {
 	computedFolds := ComputeFolds(api, circuit, sumcheckRounds, finalFoldingRandomness)
-	api.Println(computedFolds)
-
 	lastEval := frontend.Variable(0)
+	prevPoly := sumcheckRounds[1][0][:]
+	prevRandomness := sumcheckRounds[1][1][0]
 	for r := 0; r < len(circuit.RoundParametersOODSamples); r++ {
 		values := make([]frontend.Variable, len(computedFolds[r])+1)
 		values[0] = oodAnswersList[r][0]
@@ -238,21 +235,24 @@ func checkMainRounds(api frontend.API, circuit *VerifyMerkleProofCircuit, sumche
 			product := api.Mul(values[i], combinationRandomness[r][i])
 			valuesTimesCombRand = api.Add(valuesTimesCombRand, product)
 		}
-		claimedSum := api.Add(evaluateFunction(api, sumcheckRounds[r+1][0], sumcheckRounds[r+1][1][0]), valuesTimesCombRand)
+
+		claimedSum := api.Add(evaluateFunction(api, prevPoly, prevRandomness), valuesTimesCombRand)
 		checkSumOverBool(api, claimedSum, sumcheckPolynomials[r][0])
 
-		for i := 1; i < len(sumcheckPolynomials); i++ {
+		prevPoly = sumcheckPolynomials[r][0][:]
+		for i := 1; i < len(sumcheckPolynomials[r]); i++ {
 			eval := evaluateFunction(api, sumcheckPolynomials[r][i-1], finalFoldingRandomness[r][i-1])
 			lastEval = eval
 			checkSumOverBool(api, eval, sumcheckPolynomials[r][i])
+			prevPoly = sumcheckPolynomials[r][i]
+			prevRandomness = finalFoldingRandomness[r][i]
 		}
-		lastEval = evaluateFunction(api, sumcheckPolynomials[r][len(sumcheckPolynomials)-1], finalFoldingRandomness[r][len(sumcheckPolynomials)-1])
+		lastEval = evaluateFunction(api, sumcheckPolynomials[r][len(sumcheckPolynomials[r])-1], finalFoldingRandomness[r][len(sumcheckPolynomials[r])-1])
 	}
 	finalEvaluations := utilities.UnivarPoly(api, finalCoefficients, finalRandomnessPoints)
 	for fold := range computedFolds[len(computedFolds)-1] {
 		api.AssertIsEqual(computedFolds[len(computedFolds)-1][fold], finalEvaluations[fold])
 	}
-
 	if circuit.FinalSumcheckRounds > 0 {
 		checkSumOverBool(api, lastEval, finalSumcheckRounds[0][0])
 
@@ -268,23 +268,26 @@ func checkMainRounds(api frontend.API, circuit *VerifyMerkleProofCircuit, sumche
 }
 
 func ComputeVPoly(api frontend.API, circuit *VerifyMerkleProofCircuit, finalFoldingRandomness [][]frontend.Variable, sumcheckRounds [][][]frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
-	numVariables := circuit.MVParamsNumberOfVariables
-	foldingRandomness := make([]frontend.Variable, len(finalFoldingRandomness)+len(sumcheckRounds)+len(finalSumcheckRandomness))
+	foldingRandomness := make([]frontend.Variable, len(finalFoldingRandomness[0])*len(finalFoldingRandomness)+len(sumcheckRounds)+len(finalSumcheckRandomness))
 	for j := range len(finalSumcheckRandomness) {
 		foldingRandomness[j] = finalSumcheckRandomness[j]
 	}
+	ind := len(finalSumcheckRandomness)
 	for j := range len(finalFoldingRandomness) {
-		foldingRandomness[j+len(finalSumcheckRandomness)] = finalFoldingRandomness[len(finalFoldingRandomness)-1-j]
+		for i := range len(finalFoldingRandomness[j]) {
+			foldingRandomness[ind] = finalFoldingRandomness[len(finalFoldingRandomness)-1-j][len(finalFoldingRandomness[j])-1-i]
+			ind = ind + 1
+		}
 	}
 	for j := range len(sumcheckRounds) {
-		foldingRandomness[j+len(finalFoldingRandomness)+len(finalSumcheckRandomness)] = sumcheckRounds[len(sumcheckRounds)-1-j][1][0]
+		foldingRandomness[ind] = sumcheckRounds[len(sumcheckRounds)-1-j][1][0]
+		ind = ind + 1
 	}
 
 	tmpArr := make([][]frontend.Variable, len(initialOODQueries)+len(statementPoints))
-
+	numVariables := circuit.MVParamsNumberOfVariables
 	for j := range initialOODQueries {
 		tmpArr[j] = ExpandFromUnivariate(api, initialOODQueries[j], numVariables)
-		// api.Println(tmpArr[j])
 	}
 	for j := range statementPoints {
 		tmpArr[len(initialOODQueries)+j] = statementPoints[j]
@@ -430,12 +433,6 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 	initialCombinationRandomness = make([]frontend.Variable, circuit.CommittmentOODSamples+len(circuit.StatementPoints))
 	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.StatementPoints))
 
-	// api.Println(rootHash)
-	// api.Println(initialOODAnswers...)
-	// api.Println(initialOODQueries...)
-	// api.Println(combinationRandomnessGenerator)
-	// api.Println(initialCombinationRandomness...)
-
 	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor)
 	for i := 0; i < circuit.FoldingFactor; i++ {
 		sumcheckRounds[i] = make([][]frontend.Variable, 2)
@@ -452,12 +449,9 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
-		// api.Println(sumcheckPolynomialEvals)
-		// api.Println(foldingRandomnessSingle)
 		sumcheckRounds[i][0] = sumcheckPolynomialEvals
 		sumcheckRounds[i][1] = foldingRandomnessSingle
 	}
-	// api.Println(sumcheckRounds)
 	initialSumcheck(api, circuit, initialOODAnswers, initialCombinationRandomness, sumcheckRounds)
 	// // } else {
 	// // 	initialCombinationRandomness = []frontend.Variable{1}
@@ -472,14 +466,12 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
-		// api.Println(roots)
 
 		err = VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[r], circuit.Leaves[r], circuit.LeafSiblingHashes[r], circuit.AuthPaths[r], prevRoot)
 		if err != nil {
 			return err
 		}
 		prevRoot = roots[r][0]
-		api.Println(prevRoot)
 		oodPoints := make([]frontend.Variable, circuit.RoundParametersOODSamples[r])
 		oodAnswers := make([]frontend.Variable, circuit.RoundParametersOODSamples[r])
 		if circuit.RoundParametersOODSamples[r] > 0 {
@@ -491,8 +483,7 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 			if err != nil {
 				return err
 			}
-			api.Println(oodPoints)
-			api.Println(oodAnswers)
+
 			oodPointsList[r] = oodPoints
 			oodAnswersList[r] = oodAnswers
 		}
@@ -501,8 +492,6 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
-		api.Println(indexes)
-		api.Println(circuit.LeafIndexes[r])
 
 		err = IsSubset(api, uapi, *circuit, arthur, indexes, circuit.LeafIndexes[r])
 		if err != nil {
@@ -614,13 +603,8 @@ func (circuit *VerifyMerkleProofCircuit) Define(api frontend.API) error {
 			PoW(api, arthur)
 		}
 	}
-	api.Println(sumcheckPolynomials)
-	api.Println(sumcheckRounds)
-	api.Println(finalSumcheckRounds)
-	api.Println(finalFoldingRandomness)
 
 	checkMainRounds(api, circuit, sumcheckRounds, sumcheckPolynomials, finalFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckRounds)
-
 	return nil
 }
 
@@ -674,9 +658,6 @@ func verify_circuit(proofs []ProofElement, io string, transcript [2672]uints.U8)
 
 		totalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
 		containerTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
-		println(i)
-		println(numOfLeavesProved)
-		println(treeHeight)
 		totalLeaves[i] = make([][]frontend.Variable, numOfLeavesProved)
 		containerTotalLeaves[i] = make([][]frontend.Variable, numOfLeavesProved)
 		totalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
