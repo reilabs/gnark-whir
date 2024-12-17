@@ -1,6 +1,8 @@
 package typeConverters
 
 import (
+	"math/big"
+
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/math/uints"
 )
@@ -21,10 +23,39 @@ func LittleEndian(api frontend.API, varArr []frontend.Variable) frontend.Variabl
 	return frontendVar
 }
 
+func LimbsToBigIntMod(limbs [4]uint64) *big.Int {
+	modulus := new(big.Int)
+	modulus.SetString("21888242871839275222246405745257275088548364400416034343698204186575808495617", 10)
+
+	result := new(big.Int).SetUint64(limbs[0])
+
+	temp := new(big.Int).SetUint64(limbs[1])
+	result.Add(result, temp.Lsh(temp, 64))
+
+	temp.SetUint64(limbs[2])
+	result.Add(result, temp.Lsh(temp, 128))
+
+	temp.SetUint64(limbs[3])
+	result.Add(result, temp.Lsh(temp, 192))
+
+	result.Mod(result, modulus)
+
+	return result
+}
+
 func LittleEndianFromUints(api frontend.API, varArr []uints.U8) frontend.Variable {
 	frontendVar := frontend.Variable(0)
 	for i := range varArr {
 		frontendVar = api.Add(api.Mul(256, frontendVar), varArr[len(varArr)-1-i].Val)
+	}
+	return frontendVar
+}
+
+func BigEndianFromUints(api frontend.API, varArr []uints.U8) frontend.Variable {
+	frontendVar := frontend.Variable(0)
+	for i := 0; i < len(varArr); i++ {
+		frontendVar = api.Mul(frontendVar, 256)
+		frontendVar = api.Add(frontendVar, varArr[i].Val)
 	}
 	return frontendVar
 }
