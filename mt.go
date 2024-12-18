@@ -131,7 +131,7 @@ func IsSubset(api frontend.API, uapi *uints.BinaryField[uints.U64], circuit Circ
 
 func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, leafIndexes []uints.U64, leaves [][]frontend.Variable, leafSiblingHashes [][]uints.U8, authPaths [][][]uints.U8, rootHash frontend.Variable) error {
 	numOfLeavesProved := len(leaves)
-	for i := 0; i < numOfLeavesProved; i++ {
+	for i := range numOfLeavesProved {
 		treeHeight := len(authPaths[i]) + 1
 		leafIndex := api.ToBinary(uapi.ToValue(leafIndexes[i]), treeHeight)
 		leafSiblingHash := typeConverters.LittleEndianFromUints(api, leafSiblingHashes[i])
@@ -186,7 +186,7 @@ func ExpandFromUnivariate(api frontend.API, base frontend.Variable, len int) []f
 
 func checkTheVeryFirstSumcheck(api frontend.API, firstOODAnswers []frontend.Variable, initialCombinationRandomness []frontend.Variable, sumcheckRounds [][][]frontend.Variable) {
 	plugInEvaluation := frontend.Variable(0)
-	for i := 0; i < len(initialCombinationRandomness); i++ {
+	for i := range initialCombinationRandomness {
 		if i < len(firstOODAnswers) {
 			plugInEvaluation = api.Add(
 				plugInEvaluation,
@@ -223,7 +223,7 @@ func checkMainRounds(api frontend.API, circuit *Circuit, sumcheckRounds [][][]fr
 	lastEval := frontend.Variable(0)
 	prevPoly := sumcheckRounds[1][0][:]
 	prevRandomness := sumcheckRounds[1][1][0]
-	for r := 0; r < len(circuit.RoundParametersOODSamples); r++ {
+	for r := range circuit.RoundParametersOODSamples {
 		values := make([]frontend.Variable, len(computedFolds[r])+1)
 		values[0] = oodAnswersList[r][0]
 		for z := 1; z < len(values); z++ {
@@ -470,6 +470,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
+
 		prevRoot = roots[r][0]
 		oodPoints := make([]frontend.Variable, circuit.RoundParametersOODSamples[r])
 		oodAnswers := make([]frontend.Variable, circuit.RoundParametersOODSamples[r])
@@ -522,7 +523,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		perRoundCombinationRandomness[r] = combinationRandomness
 		finalFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor)
 		sumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor)
-		for i := 0; i < circuit.FoldingFactor; i++ {
+		for i := range circuit.FoldingFactor {
 			sumcheckPoly := make([]frontend.Variable, 3)
 			err = arthur.FillNextScalars(sumcheckPoly)
 			if err != nil {
@@ -582,7 +583,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	finalSumcheckRounds := make([][][]frontend.Variable, circuit.FinalSumcheckRounds)
 	finalSumcheckRandomness := make([]frontend.Variable, circuit.FinalSumcheckRounds)
-	for i := 0; i < circuit.FinalSumcheckRounds; i++ {
+	for i := range circuit.FinalSumcheckRounds {
 		finalSumcheckPolyEvals := make([]frontend.Variable, 3)
 		err = arthur.FillNextScalars(finalSumcheckPolyEvals)
 		if err != nil {
@@ -611,7 +612,7 @@ func Exponent(api frontend.API, uapi *uints.BinaryField[uints.U64], X frontend.V
 	output := frontend.Variable(1)
 	bits := api.ToBinary(uapi.ToValue(Y))
 	multiply := frontend.Variable(X)
-	for i := 0; i < len(bits); i++ {
+	for i := range bits {
 		output = api.Select(bits[i], api.Mul(output, multiply), output)
 		multiply = api.Mul(multiply, multiply)
 	}
@@ -662,11 +663,11 @@ func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8)
 		totalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
 		containerTotalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
 
-		for j := 0; j < numOfLeavesProved; j++ {
+		for j := range numOfLeavesProved {
 			totalAuthPath[i][j] = make([][]uints.U8, treeHeight)
 			containerTotalAuthPath[i][j] = make([][]uints.U8, treeHeight)
 
-			for z := 0; z < treeHeight; z++ {
+			for z := range treeHeight {
 				totalAuthPath[i][j][z] = make([]uints.U8, 32)
 				containerTotalAuthPath[i][j][z] = make([]uints.U8, 32)
 			}
@@ -682,7 +683,7 @@ func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8)
 		var prevPath = proofs[i].A.AuthPathsSuffixes[0]
 		authPathsTemp[0] = reverse(prevPath)
 
-		for j := 0; j < len(totalAuthPath[i][0]); j++ {
+		for j := range totalAuthPath[i][0] {
 			totalAuthPath[i][0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
 		}
 
