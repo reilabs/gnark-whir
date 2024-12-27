@@ -43,6 +43,7 @@ type Config struct {
 	DomainGenerator     string `json:"domain_generator"`
 	IOPattern           string `json:"io_pattern"`
 	Transcript          []byte `json:"transcript"`
+	TranscriptLen       int    `json:"transcript_len"`
 }
 
 func main() {

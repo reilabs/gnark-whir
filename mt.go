@@ -19,8 +19,6 @@ import (
 	skyscraper "github.com/reilabs/gnark-skyscraper"
 )
 
-const TRANSACTION_LENGTH = 928
-
 type Circuit struct {
 	// Inputs
 	DomainSize                           int
@@ -46,7 +44,7 @@ type Circuit struct {
 	StatementEvaluations                 int
 	// Public Input
 	IO         []byte
-	Transcript [TRANSACTION_LENGTH]uints.U8 `gnark:",public"`
+	Transcript []uints.U8 `gnark:",public"`
 }
 
 func IndexOf(_ *big.Int, inputs []*big.Int, outputs []*big.Int) error {
@@ -836,14 +834,18 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 		statementPoints[0][i] = frontend.Variable(0)
 		contStatementPoints[0][i] = frontend.Variable(0)
 	}
-	transcriptT := [TRANSACTION_LENGTH]uints.U8{}
+
+	transcriptT := make([]uints.U8, cfg.TranscriptLen)
+	contTranscript := make([]uints.U8, cfg.TranscriptLen)
+
 	for i := range cfg.Transcript {
 		transcriptT[i] = uints.NewU8(cfg.Transcript[i])
+		contTranscript[i] = uints.NewU8(cfg.Transcript[i])
 	}
 
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
-		Transcript:                           transcriptT,
+		Transcript:                           contTranscript,
 		RoundParametersOODSamples:            oodSamples,
 		RoundParametersNumOfQueries:          numOfQueries,
 		StartingDomainBackingDomainGenerator: startingDomainGen,
