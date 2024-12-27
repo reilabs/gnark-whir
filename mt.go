@@ -19,6 +19,8 @@ import (
 	skyscraper "github.com/reilabs/gnark-skyscraper"
 )
 
+const TRANSACTION_LENGTH = 928
+
 type Circuit struct {
 	// Inputs
 	DomainSize                           int
@@ -44,7 +46,7 @@ type Circuit struct {
 	StatementEvaluations                 int
 	// Public Input
 	IO         []byte
-	Transcript [3104]uints.U8 `gnark:",public"`
+	Transcript [TRANSACTION_LENGTH]uints.U8 `gnark:",public"`
 }
 
 func IndexOf(_ *big.Int, inputs []*big.Int, outputs []*big.Int) error {
@@ -69,7 +71,7 @@ func IndexOf(_ *big.Int, inputs []*big.Int, outputs []*big.Int) error {
 	return nil
 }
 
-func PoW(api frontend.API, arthur gnark_nimue.Arthur) ([]uints.U8, []uints.U8, error) {
+func PoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arthur, difficulty int) ([]uints.U8, []uints.U8, error) {
 	challenge := make([]uints.U8, 32)
 	if err := arthur.FillChallengeBytes(challenge); err != nil {
 		return nil, nil, err
@@ -81,6 +83,7 @@ func PoW(api frontend.API, arthur gnark_nimue.Arthur) ([]uints.U8, []uints.U8, e
 		return nil, nil, err
 	}
 	// api.Println(nonce)
+	CheckPoW(api, sc, challenge, nonce, difficulty)
 	return challenge, nonce, nil
 }
 
@@ -230,6 +233,8 @@ func initialSumcheck(
 	checkTheVeryFirstSumcheck(api, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
 
 	for roundIndex := 1; roundIndex < circuit.FoldingFactor; roundIndex++ {
+		api.Println(roundIndex - 1)
+		api.Println(len(sumcheckRounds))
 		evaluatedPolyAtRandomness := evaluateFunction(
 			api,
 			sumcheckRounds[roundIndex-1][0],
@@ -261,10 +266,12 @@ func checkMainRounds(
 	computedFolds := ComputeFolds(api, circuit, sumcheckRounds, finalFoldingRandomness)
 
 	var lastEval frontend.Variable
-	prevPoly := sumcheckRounds[1][0][:]
-	prevRandomness := sumcheckRounds[1][1][0]
+	prevPoly := sumcheckRounds[len(sumcheckRounds)-1][0][:]
+	prevRandomness := sumcheckRounds[len(sumcheckRounds)-1][1][0]
+	api.Println(sumcheckRounds)
 
 	for roundIndex := range circuit.RoundParametersOODSamples {
+		api.Println(roundIndex)
 		currentValues := make([]frontend.Variable, len(computedFolds[roundIndex])+1)
 		currentValues[0] = oodAnswersList[roundIndex][0]
 		copy(currentValues[1:], computedFolds[roundIndex][:])
@@ -274,8 +281,8 @@ func checkMainRounds(
 			product := api.Mul(val, combinationRandomness[roundIndex][i])
 			valuesTimesCombRand = api.Add(valuesTimesCombRand, product)
 		}
-
 		claimedSum := api.Add(evaluateFunction(api, prevPoly, prevRandomness), valuesTimesCombRand)
+
 		checkSumOverBool(api, claimedSum, sumcheckPolynomials[roundIndex][0])
 
 		prevPoly = sumcheckPolynomials[roundIndex][0][:]
@@ -307,7 +314,7 @@ func checkMainRounds(
 		checkSumOverBool(api, lastEval, finalSumcheckRounds[0][0])
 
 		for round := 1; round < len(finalSumcheckRounds); round++ {
-			eval := evaluateFunction(api, finalSumcheckRounds[round-1][0], finalSumcheckRounds[round-1][0])
+			eval := evaluateFunction(api, finalSumcheckRounds[round-1][0], finalSumcheckRounds[round-1][1][0])
 			lastEval = eval
 			checkSumOverBool(api, eval, finalSumcheckRounds[round][0])
 		}
@@ -332,17 +339,16 @@ func checkMainRounds(
 		perRoundCombinationRandomness,
 		finalSumcheckRandomness,
 	)
-	api.Println(evaluationOfVPoly)
-	// api.AssertIsEqual(
-	// 	lastEval,
-	// 	api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
-	// )
+	api.AssertIsEqual(
+		lastEval,
+		api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
+	)
 }
 
 func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][]frontend.Variable, sumcheckRounds [][][]frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
 	foldingRandomness := make([]frontend.Variable, len(finalFoldingRandomness[0])*len(finalFoldingRandomness)+len(sumcheckRounds)+len(finalSumcheckRandomness))
 	for j := range len(finalSumcheckRandomness) {
-		foldingRandomness[j] = finalSumcheckRandomness[j]
+		foldingRandomness[j] = finalSumcheckRandomness[len(finalSumcheckRandomness)-1-j]
 	}
 	ind := len(finalSumcheckRandomness)
 	for j := range len(finalFoldingRandomness) {
@@ -355,6 +361,7 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][
 		foldingRandomness[ind] = sumcheckRounds[len(sumcheckRounds)-1-j][1][0]
 		ind = ind + 1
 	}
+	api.Println(foldingRandomness...)
 
 	tmpArr := make([][]frontend.Variable, len(initialOODQueries)+len(statementPoints))
 	numVariables := circuit.MVParamsNumberOfVariables
@@ -571,7 +578,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 		// api.Println(circuit.PowBytes)
 		if circuit.PowBits[r] > 0 {
-			_, _, err := PoW(api, arthur)
+			_, _, err := PoW(api, sc, arthur, circuit.PowBits[r])
 			if err != nil {
 				return err
 			}
@@ -608,7 +615,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
 	}
-
+	api.Println(circuit.FinalSumcheckRounds)
 	finalCoefficients := make([]frontend.Variable, 1<<circuit.FinalSumcheckRounds)
 	if err = arthur.FillNextScalars(finalCoefficients); err != nil {
 		return err
@@ -636,7 +643,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 	if circuit.FinalPowBits > 0 {
-		_, _, err := PoW(api, arthur)
+		_, _, err := PoW(api, sc, arthur, circuit.FinalPowBits)
 		if err != nil {
 			return err
 		}
@@ -663,7 +670,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		finalSumcheckRounds[i][1] = finalFoldingRandomnessSingle
 		finalSumcheckRandomness[i] = finalFoldingRandomnessSingle[0]
 		if circuit.FinalFoldingPowBits > 0 {
-			PoW(api, arthur)
+			PoW(api, sc, arthur, circuit.FinalFoldingPowBits)
 		}
 	}
 
@@ -704,7 +711,45 @@ func reverse[T any](s []T) []T {
 	return res
 }
 
-func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8) {
+func CheckPoW(api frontend.API, sc *skyscraper.Skyscraper, challenge frontend.Variable, nonce frontend.Variable, difficulty int) error {
+	hash := sc.Compress(challenge, nonce)
+
+	d0, _ := new(big.Int).SetString("21888242871839275222246405745257275088548364400416034343698204186575808495617", 10)
+	d1, _ := new(big.Int).SetString("10944121435919637611123202872628637544274182200208017171849102093287904247808", 10)
+	d2, _ := new(big.Int).SetString("5472060717959818805561601436314318772137091100104008585924551046643952123904", 10)
+	d3, _ := new(big.Int).SetString("2736030358979909402780800718157159386068545550052004292962275523321976061952", 10)
+	d4, _ := new(big.Int).SetString("1368015179489954701390400359078579693034272775026002146481137761660988030976", 10)
+	d5, _ := new(big.Int).SetString("684007589744977350695200179539289846517136387513001073240568880830494015488", 10)
+	d6, _ := new(big.Int).SetString("342003794872488675347600089769644923258568193756500536620284440415247007744", 10)
+	d7, _ := new(big.Int).SetString("171001897436244337673800044884822461629284096878250268310142220207623503872", 10)
+	d8, _ := new(big.Int).SetString("85500948718122168836900022442411230814642048439125134155071110103811751936", 10)
+	d9, _ := new(big.Int).SetString("42750474359061084418450011221205615407321024219562567077535555051905875968", 10)
+	d10, _ := new(big.Int).SetString("21375237179530542209225005610602807703660512109781283538767777525952937984", 10)
+	d11, _ := new(big.Int).SetString("10687618589765271104612502805301403851830256054890641769383888762976468992", 10)
+	d12, _ := new(big.Int).SetString("5343809294882635552306251402650701925915128027445320884691944381488234496", 10)
+	d13, _ := new(big.Int).SetString("2671904647441317776153125701325350962957564013722660442345972190744117248", 10)
+	d14, _ := new(big.Int).SetString("1335952323720658888076562850662675481478782006861330221172986095372058624", 10)
+	d15, _ := new(big.Int).SetString("667976161860329444038281425331337740739391003430665110586493047686029312", 10)
+	d16, _ := new(big.Int).SetString("333988080930164722019140712665668870369695501715332555293246523843014656", 10)
+	d17, _ := new(big.Int).SetString("166994040465082361009570356332834435184847750857666277646623261921507328", 10)
+	d18, _ := new(big.Int).SetString("83497020232541180504785178166417217592423875428833138823311630960753664", 10)
+	d19, _ := new(big.Int).SetString("41748510116270590252392589083208608796211937714416569411655815480376832", 10)
+	d20, _ := new(big.Int).SetString("20874255058135295126196294541604304398105968857208284705827907740188416", 10)
+	d21, _ := new(big.Int).SetString("10437127529067647563098147270802152199052984428604142352913953870094208", 10)
+	d22, _ := new(big.Int).SetString("5218563764533823781549073635401076099526492214302071176456976935047104", 10)
+	d23, _ := new(big.Int).SetString("2609281882266911890774536817700538049763246107151035588228488467523552", 10)
+	d24, _ := new(big.Int).SetString("1304640941133455945387268408850269024881623053575517794114244233761776", 10)
+	d25, _ := new(big.Int).SetString("652320470566727972693634204425134512440811526787758897057122116880888", 10)
+	d26, _ := new(big.Int).SetString("326160235283363986346817102212567256220405763393879448528561058440444", 10)
+	d27, _ := new(big.Int).SetString("163080117641681993173408551106283628110202881696939724264280529220222", 10)
+
+	var arr = [28]*big.Int{d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15, d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27}
+
+	api.AssertIsLessOrEqual(hash, arr[difficulty])
+	return nil
+}
+
+func verify_circuit(proofs []ProofElement, cfg Config) {
 	var totalAuthPath = make([][][][]uints.U8, len(proofs))
 	var totalLeaves = make([][][]frontend.Variable, len(proofs))
 	var totalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
@@ -734,8 +779,8 @@ func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8)
 				totalAuthPath[i][j][z] = make([]uints.U8, 32)
 				containerTotalAuthPath[i][j][z] = make([]uints.U8, 32)
 			}
-			totalLeaves[i][j] = make([]frontend.Variable, 4)
-			containerTotalLeaves[i][j] = make([]frontend.Variable, 4)
+			totalLeaves[i][j] = make([]frontend.Variable, len(proofs[i].B[j]))
+			containerTotalLeaves[i][j] = make([]frontend.Variable, len(proofs[i].B[j]))
 			totalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
 			containerTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
 		}
@@ -762,23 +807,47 @@ func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8)
 		for z := range numOfLeavesProved {
 			totalLeafSiblingHashes[i][z] = uints.NewU8Array(proofs[i].A.LeafSiblingHashes[z].KeccakDigest[:])
 			totalLeafIndexes[i][z] = uints.NewU64(proofs[i].A.LeafIndexes[z])
+			// fmt.Println(proofs[i].B[z])
 			for j := range proofs[i].B[z] {
 				input := proofs[i].B[z][j]
+				// fmt.Println("===============")
+				// fmt.Println(j)
+				// fmt.Println(input.Limbs)
+				// fmt.Println("===============")
 				totalLeaves[i][z][j] = typeConverters.LimbsToBigIntMod(input.Limbs)
 			}
 		}
 	}
-	startingDomainGen, _ := new(big.Int).SetString("19200870435978225707111062059747084165650991997241425080699860725083300967194", 10)
-	mvParamsNumberOfVariables := 24
-	foldingFactor := 2
+	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
+	mvParamsNumberOfVariables := cfg.NVars
+	foldingFactor := cfg.FoldingFactor
 	finalSumcheckRounds := mvParamsNumberOfVariables % foldingFactor
-	domainSize := 33554432
+	domainSize := 2 << mvParamsNumberOfVariables
+	oodSamples := cfg.OODSamples
+	numOfQueries := cfg.NumQueries
+	powBits := cfg.PowBits
+	finalQueries := cfg.FinalQueries
+	nRounds := cfg.NRounds
+	statementPoints := make([][]frontend.Variable, 1)
+	statementPoints[0] = make([]frontend.Variable, mvParamsNumberOfVariables)
+	contStatementPoints := make([][]frontend.Variable, 1)
+	contStatementPoints[0] = make([]frontend.Variable, mvParamsNumberOfVariables)
+	for i := range mvParamsNumberOfVariables {
+		statementPoints[0][i] = frontend.Variable(0)
+		contStatementPoints[0][i] = frontend.Variable(0)
+	}
+	transcriptT := [TRANSACTION_LENGTH]uints.U8{}
+	for i := range cfg.Transcript {
+		transcriptT[i] = uints.NewU8(cfg.Transcript[i])
+	}
+
 	var circuit = Circuit{
-		IO:                                   []byte(io),
-		RoundParametersOODSamples:            []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-		RoundParametersNumOfQueries:          []int{100, 50, 34, 25, 20, 17, 15, 13, 12, 10, 10},
+		IO:                                   []byte(cfg.IOPattern),
+		Transcript:                           transcriptT,
+		RoundParametersOODSamples:            oodSamples,
+		RoundParametersNumOfQueries:          numOfQueries,
 		StartingDomainBackingDomainGenerator: startingDomainGen,
-		ParamNRounds:                         11,
+		ParamNRounds:                         nRounds,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
@@ -786,11 +855,11 @@ func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8)
 		FoldingFactor:                        foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
-		PowBits:                              []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		PowBits:                              powBits,
 		FinalPowBits:                         0,
 		FinalFoldingPowBits:                  0,
-		FinalQueries:                         9,
-		StatementPoints:                      [][]frontend.Variable{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+		FinalQueries:                         finalQueries,
+		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
 		Leaves:                               containerTotalLeaves,
 		LeafIndexes:                          containerTotalLeafIndexes,
@@ -802,24 +871,24 @@ func verify_circuit(proofs []ProofElement, io string, transcript [3104]uints.U8)
 	pk, vk, _ := groth16.Setup(ccs)
 
 	assignment := Circuit{
-		IO:                                   []byte(io),
-		Transcript:                           transcript,
+		IO:                                   []byte(cfg.IOPattern),
+		Transcript:                           transcriptT,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		StartingDomainBackingDomainGenerator: startingDomainGen,
 		FoldingFactor:                        foldingFactor,
-		PowBits:                              []int{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		PowBits:                              powBits,
 		FinalPowBits:                         0,
 		FinalFoldingPowBits:                  0,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
-		RoundParametersOODSamples:            []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-		RoundParametersNumOfQueries:          []int{100, 50, 34, 25, 20, 17, 15, 13, 12, 10, 10},
-		ParamNRounds:                         11,
-		FinalQueries:                         9,
-		StatementPoints:                      [][]frontend.Variable{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+		RoundParametersOODSamples:            oodSamples,
+		RoundParametersNumOfQueries:          numOfQueries,
+		ParamNRounds:                         nRounds,
+		FinalQueries:                         finalQueries,
+		StatementPoints:                      statementPoints,
 		StatementEvaluations:                 0,
 		Leaves:                               totalLeaves,
 		LeafIndexes:                          totalLeafIndexes,
