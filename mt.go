@@ -779,7 +779,6 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 				totalAuthPath[i][j][z] = make([]uints.U8, 32)
 				containerTotalAuthPath[i][j][z] = make([]uints.U8, 32)
 			}
-			fmt.Println("totalLeafs len ", len(proofs[i].B[j]))
 			totalLeaves[i][j] = make([]frontend.Variable, len(proofs[i].B[j]))
 			containerTotalLeaves[i][j] = make([]frontend.Variable, len(proofs[i].B[j]))
 			totalLeafSiblingHashes[i][j] = make([]uints.U8, 32)

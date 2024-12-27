@@ -2,7 +2,7 @@ module reilabs/whir-verifier-circuit
 
 go 1.23.3
 
-replace github.com/consensys/gnark => /Users/veljkovranic/reilabs/gnark
+// replace github.com/consensys/gnark => /Users/veljkovranic/reilabs/gnark
 
 require (
 	github.com/consensys/gnark v0.11.0
