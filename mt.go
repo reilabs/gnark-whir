@@ -814,7 +814,7 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 	mvParamsNumberOfVariables := cfg.NVars
 	foldingFactor := cfg.FoldingFactor
 	finalSumcheckRounds := mvParamsNumberOfVariables % foldingFactor
-	domainSize := 2 << mvParamsNumberOfVariables
+	domainSize := (2 << mvParamsNumberOfVariables) * (1 << cfg.Rate) / 2
 	oodSamples := cfg.OODSamples
 	numOfQueries := cfg.NumQueries
 	powBits := cfg.PowBits
