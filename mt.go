@@ -81,7 +81,10 @@ func PoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arthur,
 		return nil, nil, err
 	}
 	// api.Println(nonce)
-	CheckPoW(api, sc, challenge, nonce, difficulty)
+	challengeFieldElement := typeConverters.LittleEndianFromUints(api, challenge)
+	nonceFieldElement := typeConverters.BigEndianFromUints(api, nonce)
+	// api.Println(nonceFieldElement)
+	CheckPoW(api, sc, challengeFieldElement, nonceFieldElement, difficulty)
 	return challenge, nonce, nil
 }
 
@@ -132,8 +135,8 @@ func IsSubset(api frontend.API, uapi *uints.BinaryField[uints.U64], circuit Circ
 			return newerr
 		}
 		searchRes := dedupedLUT.Lookup(res[0])
-		api.Println(searchRes...)
-		// api.AssertIsEqual(x, searchRes[0])
+		//api.Println(searchRes...)
+		api.AssertIsEqual(x, searchRes[0])
 	}
 	return nil
 }
@@ -168,7 +171,7 @@ func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64]
 
 			currentHash = sc.Compress(left, right)
 		}
-		// api.AssertIsEqual(currentHash, rootHash)
+		api.AssertIsEqual(currentHash, rootHash)
 	}
 	return nil
 }
@@ -216,7 +219,6 @@ func evaluateFunction(api frontend.API, evaluations []frontend.Variable, point f
 
 func checkSumOverBool(api frontend.API, value frontend.Variable, polyEvals []frontend.Variable) {
 	sumOverBools := api.Add(polyEvals[0], polyEvals[1])
-	api.Println(sumOverBools)
 	api.AssertIsEqual(value, sumOverBools)
 }
 
@@ -231,8 +233,6 @@ func initialSumcheck(
 	checkTheVeryFirstSumcheck(api, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
 
 	for roundIndex := 1; roundIndex < circuit.FoldingFactor; roundIndex++ {
-		api.Println(roundIndex - 1)
-		api.Println(len(sumcheckRounds))
 		evaluatedPolyAtRandomness := evaluateFunction(
 			api,
 			sumcheckRounds[roundIndex-1][0],
@@ -266,10 +266,8 @@ func checkMainRounds(
 	var lastEval frontend.Variable
 	prevPoly := sumcheckRounds[len(sumcheckRounds)-1][0][:]
 	prevRandomness := sumcheckRounds[len(sumcheckRounds)-1][1][0]
-	api.Println(sumcheckRounds)
 
 	for roundIndex := range circuit.RoundParametersOODSamples {
-		api.Println(roundIndex)
 		currentValues := make([]frontend.Variable, len(computedFolds[roundIndex])+1)
 		currentValues[0] = oodAnswersList[roundIndex][0]
 		copy(currentValues[1:], computedFolds[roundIndex][:])
@@ -359,7 +357,6 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][
 		foldingRandomness[ind] = sumcheckRounds[len(sumcheckRounds)-1-j][1][0]
 		ind = ind + 1
 	}
-	api.Println(foldingRandomness...)
 
 	tmpArr := make([][]frontend.Variable, len(initialOODQueries)+len(statementPoints))
 	numVariables := circuit.MVParamsNumberOfVariables
@@ -536,7 +533,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return err
 		}
 
-		// api.Println(prevRoot)
 		err = VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[r], circuit.Leaves[r], circuit.LeafSiblingHashes[r], circuit.AuthPaths[r], prevRoot)
 		if err != nil {
 			return err
@@ -613,7 +609,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
 	}
-	api.Println(circuit.FinalSumcheckRounds)
 	finalCoefficients := make([]frontend.Variable, 1<<circuit.FinalSumcheckRounds)
 	if err = arthur.FillNextScalars(finalCoefficients); err != nil {
 		return err
@@ -742,7 +737,6 @@ func CheckPoW(api frontend.API, sc *skyscraper.Skyscraper, challenge frontend.Va
 	d27, _ := new(big.Int).SetString("163080117641681993173408551106283628110202881696939724264280529220222", 10)
 
 	var arr = [28]*big.Int{d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13, d14, d15, d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27}
-
 	api.AssertIsLessOrEqual(hash, arr[difficulty])
 	return nil
 }
