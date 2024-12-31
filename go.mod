@@ -2,8 +2,6 @@ module reilabs/whir-verifier-circuit
 
 go 1.23.3
 
-// replace github.com/consensys/gnark => /Users/veljkovranic/reilabs/gnark
-
 require (
 	github.com/consensys/gnark v0.11.0
 	github.com/consensys/gnark-crypto v0.14.1-0.20241217131346-b998989abdbe
@@ -18,7 +16,8 @@ require (
 	github.com/consensys/bavard v0.1.24 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/google/pprof v0.0.0-20241122213907-cbe949e5a41b // indirect
-	github.com/ingonyama-zk/icicle/v3 v3.1.1-0.20241118092657-fccdb2f0921b // indirect
+	github.com/ingonyama-zk/icicle v1.1.0 // indirect
+	github.com/ingonyama-zk/iciclegnark v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
