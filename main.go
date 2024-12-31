@@ -41,6 +41,7 @@ type Config struct {
 	FinalPowBits        int    `json:"final_pow_bits"`
 	FinalFoldingPowBits int    `json:"final_folding_pow_bits"`
 	DomainGenerator     string `json:"domain_generator"`
+	Rate                int    `json:"rate"`
 	IOPattern           string `json:"io_pattern"`
 	Transcript          []byte `json:"transcript"`
 	TranscriptLen       int    `json:"transcript_len"`
