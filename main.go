@@ -25,6 +25,11 @@ type MultiPath[Digest any] struct {
 	LeafIndexes            []uint64
 }
 
+type ProofObject struct {
+	MerklePaths                  []ProofElement
+	StatementValuesAtRandomPoint []Fp256
+}
+
 type ProofElement struct {
 	A MultiPath[KeccakDigest]
 	B [][]Fp256
@@ -33,7 +38,7 @@ type ProofElement struct {
 type Config struct {
 	NRounds             int    `json:"n_rounds"`
 	NVars               int    `json:"n_vars"`
-	FoldingFactor       int    `json:"folding_factor"`
+	FoldingFactor       []int  `json:"folding_factor"`
 	OODSamples          []int  `json:"ood_samples"`
 	NumQueries          []int  `json:"num_queries"`
 	PowBits             []int  `json:"pow_bits"`
@@ -48,14 +53,14 @@ type Config struct {
 }
 
 func main() {
-	f, err := os.Open("../whir/proof")
+	f, err := os.Open("../ProveKit/proof")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer f.Close()
 
-	params, err := os.ReadFile("../whir/params")
+	params, err := os.ReadFile("../ProveKit/params")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -68,12 +73,12 @@ func main() {
 
 	fmt.Printf("Parsed configuration:\n%+v\n", cfg)
 
-	var x []ProofElement
+	var x ProofObject
 	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
 
 	io := gnark_nimue.IOPattern{}
 	_ = io.Parse([]byte(cfg.IOPattern))
 	fmt.Printf("io: %s\n", io.PPrint())
 
-	verify_circuit(x, cfg)
+	verify_circuit(x.MerklePaths, cfg)
 }
