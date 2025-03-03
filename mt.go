@@ -24,7 +24,7 @@ type Circuit struct {
 	DomainSize                           int
 	StartingDomainBackingDomainGenerator frontend.Variable
 	CommittmentOODSamples                int
-	FoldingFactor                        int
+	FoldingFactor                        []int
 	FinalSumcheckRounds                  int
 	ParamNRounds                         int
 	MVParamsNumberOfVariables            int
@@ -42,6 +42,8 @@ type Circuit struct {
 	AuthPaths                            [][][][]uints.U8
 	StatementPoints                      [][]frontend.Variable
 	StatementEvaluations                 int
+	AffineStatementPoints                []frontend.Variable
+	AffineStatementEvaluations           []frontend.Variable
 	// Public Input
 	IO         []byte
 	Transcript []uints.U8 `gnark:",public"`
@@ -94,8 +96,9 @@ func GetStirChallenges(
 	arthur gnark_nimue.Arthur,
 	numQueries int,
 	domainSize int,
+	r int,
 ) ([]frontend.Variable, error) {
-	foldedDomainSize := domainSize / (1 << circuit.FoldingFactor)
+	foldedDomainSize := domainSize / (1 << circuit.FoldingFactor[r])
 	domainSizeBytes := (bits.Len(uint(foldedDomainSize*2-1)) - 1 + 7) / 8
 
 	stirQueries := make([]uints.U8, domainSizeBytes*numQueries)
@@ -232,7 +235,7 @@ func initialSumcheck(
 
 	checkTheVeryFirstSumcheck(api, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
 
-	for roundIndex := 1; roundIndex < circuit.FoldingFactor; roundIndex++ {
+	for roundIndex := 1; roundIndex < circuit.FoldingFactor[0]; roundIndex++ {
 		evaluatedPolyAtRandomness := evaluateFunction(
 			api,
 			sumcheckRounds[roundIndex-1][0],
@@ -322,9 +325,11 @@ func checkMainRounds(
 		)
 	}
 
+	finalValue := utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)
 	evaluationOfVPoly := ComputeVPoly(
 		api,
 		circuit,
+		finalValue,
 		finalFoldingRandomness,
 		sumcheckRounds,
 		initialOODQueries,
@@ -337,11 +342,11 @@ func checkMainRounds(
 	)
 	api.AssertIsEqual(
 		lastEval,
-		api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
+		evaluationOfVPoly,
 	)
 }
 
-func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][]frontend.Variable, sumcheckRounds [][][]frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
+func ComputeVPoly(api frontend.API, circuit *Circuit, finalValue frontend.Variable, finalFoldingRandomness [][]frontend.Variable, sumcheckRounds [][][]frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
 	foldingRandomness := make([]frontend.Variable, len(finalFoldingRandomness[0])*len(finalFoldingRandomness)+len(sumcheckRounds)+len(finalSumcheckRandomness))
 	for j := range len(finalSumcheckRandomness) {
 		foldingRandomness[j] = finalSumcheckRandomness[len(finalSumcheckRandomness)-1-j]
@@ -358,7 +363,8 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][
 		ind = ind + 1
 	}
 
-	tmpArr := make([][]frontend.Variable, len(initialOODQueries)+len(statementPoints))
+	//This might need to change as well
+	tmpArr := make([][]frontend.Variable, len(initialOODQueries)+len(statementPoints)+len(circuit.AffineStatementPoints))
 	numVariables := circuit.MVParamsNumberOfVariables
 	for j := range initialOODQueries {
 		tmpArr[j] = ExpandFromUnivariate(api, initialOODQueries[j], numVariables)
@@ -367,14 +373,15 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][
 		tmpArr[len(initialOODQueries)+j] = statementPoints[j]
 	}
 	value := frontend.Variable(0)
+	// TODO: VELJKO this for loop is performing only eval claims, we need a new one for affine statements (which will consume a new circuit param)
 	for j := range tmpArr {
-		value = api.Add(value, api.Mul(initialCombinationRandomness[j], EqPolyOutside(api, tmpArr[j], foldingRandomness)))
+		value = api.Add(value, api.Mul(finalValue, api.Mul(initialCombinationRandomness[j], EqPolyOutside(api, tmpArr[j], foldingRandomness))))
 	}
 	numberVars := numVariables
 
 	for r := range oodPointLists {
 		newTmpArr := make([]frontend.Variable, len(oodPointLists[r])+len(stirChallengesPoints[r]))
-		numberVars -= circuit.FoldingFactor
+		numberVars -= circuit.FoldingFactor[len(circuit.FoldingFactor)-1]
 		for i := range oodPointLists[r] {
 			newTmpArr[i] = oodPointLists[r][i]
 		}
@@ -391,7 +398,7 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][
 			point := ExpandFromUnivariate(api, newTmpArr[i], numberVars)
 			sumOfClaims = api.Add(sumOfClaims, api.Mul(EqPolyOutside(api, point, foldingRandomness[0:numberVars]), perRoundCombinationRandomness[r][i]))
 		}
-		value = api.Add(value, sumOfClaims)
+		value = api.Add(value, api.Mul(sumOfClaims, finalValue))
 	}
 
 	return value
@@ -473,7 +480,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	perRoundCombinationRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	exp := uint64(1 << circuit.FoldingFactor)
+	exp := uint64(1 << circuit.FoldingFactor[0])
 	expDomainGenerator := Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(exp))
 	domainSize := circuit.DomainSize
 
@@ -502,7 +509,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	initialCombinationRandomness = make([]frontend.Variable, circuit.CommittmentOODSamples+len(circuit.StatementPoints))
 	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.StatementPoints))
 
-	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor)
+	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor[0])
 	for i := range circuit.FoldingFactor {
 		sumcheckRounds[i] = make([][]frontend.Variable, 2)
 		sumcheckPolynomialEvals := make([]frontend.Variable, 3)
@@ -555,7 +562,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			oodAnswersList[r] = oodAnswers
 		}
 
-		indexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize)
+		indexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize, r)
 		if err != nil {
 			return err
 		}
@@ -588,8 +595,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		combinationRandomness := ExpandRandomness(api, combRandomnessGen[0], len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
 		perRoundCombinationRandomness[r] = combinationRandomness
 
-		finalFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor)
-		sumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor)
+		finalFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor[r])
+		sumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor[r])
 
 		for i := range circuit.FoldingFactor {
 			sumcheckPoly := make([]frontend.Variable, 3)
@@ -614,7 +621,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize)
+	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize, len(circuit.LeafIndexes)-1)
 	if err != nil {
 		api.Println(err)
 		return nil
@@ -813,7 +820,7 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
 	mvParamsNumberOfVariables := cfg.NVars
 	foldingFactor := cfg.FoldingFactor
-	finalSumcheckRounds := mvParamsNumberOfVariables % foldingFactor
+	finalSumcheckRounds := (mvParamsNumberOfVariables - foldingFactor[0]) % foldingFactor[len(foldingFactor)-1]
 	domainSize := (2 << mvParamsNumberOfVariables) * (1 << cfg.Rate) / 2
 	oodSamples := cfg.OODSamples
 	numOfQueries := cfg.NumQueries
@@ -837,6 +844,14 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 		contTranscript[i] = uints.NewU8(cfg.Transcript[i])
 	}
 
+	affineStatementPoints := make([]frontend.Variable, mvParamsNumberOfVariables)
+	affineStatementEvaluations := make([]frontend.Variable, mvParamsNumberOfVariables)
+
+	for i := range mvParamsNumberOfVariables {
+		affineStatementPoints[i] = frontend.Variable(0)
+		affineStatementEvaluations[i] = frontend.Variable(0)
+	}
+
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           contTranscript,
@@ -857,6 +872,8 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
+		AffineStatementPoints:                affineStatementPoints,
+		AffineStatementEvaluations:           affineStatementEvaluations,
 		Leaves:                               containerTotalLeaves,
 		LeafIndexes:                          containerTotalLeafIndexes,
 		LeafSiblingHashes:                    containerTotalLeafSiblingHashes,
@@ -886,6 +903,8 @@ func verify_circuit(proofs []ProofElement, cfg Config) {
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      statementPoints,
 		StatementEvaluations:                 0,
+		AffineStatementPoints:                affineStatementPoints,
+		AffineStatementEvaluations:           affineStatementEvaluations,
 		Leaves:                               totalLeaves,
 		LeafIndexes:                          totalLeafIndexes,
 		LeafSiblingHashes:                    totalLeafSiblingHashes,
