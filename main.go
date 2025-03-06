@@ -25,6 +25,11 @@ type MultiPath[Digest any] struct {
 	LeafIndexes            []uint64
 }
 
+type ProofObject struct {
+	MerklePaths                  []ProofElement
+	StatementValuesAtRandomPoint []Fp256
+}
+
 type ProofElement struct {
 	A MultiPath[KeccakDigest]
 	B [][]Fp256
@@ -62,6 +67,7 @@ func main() {
 	defer f.Close()
 
 	params, err := os.ReadFile("../../ProveKit/prover/params")
+
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -82,5 +88,5 @@ func main() {
 	_ = io.Parse([]byte(cfg.IOPattern))
 	fmt.Printf("io: %s\n", io.PPrint())
 
-	verify_circuit(x, cfg)
+	verify_circuit(x.MerklePaths, cfg)
 }
