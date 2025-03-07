@@ -42,8 +42,8 @@ type Circuit struct {
 	AuthPaths                            [][][][]uints.U8
 	StatementPoints                      [][]frontend.Variable
 	StatementEvaluations                 int
-	LinearStatementValuesAtPoints        []frontend.Variable
-	LinearStatementEvaluations           []frontend.Variable
+	AffineStatementPoints                []frontend.Variable
+	AffineStatementEvaluations           []frontend.Variable
 	// Public Input
 	IO         []byte
 	Transcript []uints.U8 `gnark:",public"`
@@ -199,18 +199,13 @@ func ExpandFromUnivariate(api frontend.API, base frontend.Variable, len int) []f
 	return res
 }
 
-func checkTheVeryFirstSumcheck(api frontend.API, circuit *Circuit, firstOODAnswers []frontend.Variable, initialCombinationRandomness []frontend.Variable, sumcheckRounds [][][]frontend.Variable) {
+func checkTheVeryFirstSumcheck(api frontend.API, firstOODAnswers []frontend.Variable, initialCombinationRandomness []frontend.Variable, sumcheckRounds [][][]frontend.Variable) {
 	plugInEvaluation := frontend.Variable(0)
 	for i := range initialCombinationRandomness {
 		if i < len(firstOODAnswers) {
 			plugInEvaluation = api.Add(
 				plugInEvaluation,
 				api.Mul(initialCombinationRandomness[i], firstOODAnswers[i]),
-			)
-		} else {
-			plugInEvaluation = api.Add(
-				plugInEvaluation,
-				api.Mul(initialCombinationRandomness[i], circuit.LinearStatementEvaluations[i-len(firstOODAnswers)]),
 			)
 		}
 	}
@@ -238,7 +233,7 @@ func initialSumcheck(
 	sumcheckRounds [][][]frontend.Variable,
 ) {
 
-	checkTheVeryFirstSumcheck(api, circuit, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
+	checkTheVeryFirstSumcheck(api, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
 
 	for roundIndex := 1; roundIndex < circuit.FoldingFactor[0]; roundIndex++ {
 		evaluatedPolyAtRandomness := evaluateFunction(
@@ -368,16 +363,20 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalValue frontend.Variab
 		ind = ind + 1
 	}
 
+	//This might need to change as well
+	tmpArr := make([][]frontend.Variable, len(initialOODQueries)+len(statementPoints)+len(circuit.AffineStatementPoints))
 	numVariables := circuit.MVParamsNumberOfVariables
-
-	value := frontend.Variable(0)
 	for j := range initialOODQueries {
-		value = api.Add(value, api.Mul(initialCombinationRandomness[j], EqPolyOutside(api, ExpandFromUnivariate(api, initialOODQueries[j], numVariables), foldingRandomness)))
+		tmpArr[j] = ExpandFromUnivariate(api, initialOODQueries[j], numVariables)
 	}
-	for j := range circuit.LinearStatementValuesAtPoints {
-		value = api.Add(value, api.Mul(initialCombinationRandomness[len(initialOODQueries)+j], circuit.LinearStatementValuesAtPoints[j]))
+	for j := range statementPoints {
+		tmpArr[len(initialOODQueries)+j] = statementPoints[j]
 	}
-
+	value := frontend.Variable(0)
+	// TODO: VELJKO this for loop is performing only eval claims, we need a new one for affine statements (which will consume a new circuit param)
+	for j := range tmpArr {
+		value = api.Add(value, api.Mul(finalValue, api.Mul(initialCombinationRandomness[j], EqPolyOutside(api, tmpArr[j], foldingRandomness))))
+	}
 	numberVars := numVariables
 
 	for r := range oodPointLists {
@@ -476,23 +475,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	// TODO: remove this after Spartan verifier is done
-	t_rand := make([]frontend.Variable, 3)
-	if err = arthur.FillChallengeScalars(t_rand); err != nil {
-		return err
-	}
-
-	for i := 0; i < 3; i++ {
-		sp := make([]frontend.Variable, 4)
-		if err = arthur.FillNextScalars(sp); err != nil {
-			return err
-		}
-		sp_rand := make([]frontend.Variable, 1)
-		if err = arthur.FillChallengeScalars(sp_rand); err != nil {
-			return err
-		}
-	}
-
 	finalFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	sumcheckPolynomials := make([][][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
@@ -524,8 +506,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	initialCombinationRandomness = make([]frontend.Variable, circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
-	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
+	initialCombinationRandomness = make([]frontend.Variable, circuit.CommittmentOODSamples+len(circuit.StatementPoints))
+	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.StatementPoints))
 
 	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor[0])
 	for i := range circuit.FoldingFactor {
@@ -766,8 +748,7 @@ func CheckPoW(api frontend.API, sc *skyscraper.Skyscraper, challenge frontend.Va
 	return nil
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config) {
-	proofs := proof_arg.MerklePaths
+func verify_circuit(proofs []ProofElement, cfg Config) {
 	var totalAuthPath = make([][][][]uints.U8, len(proofs))
 	var totalLeaves = make([][][]frontend.Variable, len(proofs))
 	var totalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
@@ -839,7 +820,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
 	mvParamsNumberOfVariables := cfg.NVars
 	foldingFactor := cfg.FoldingFactor
-	finalSumcheckRounds := mvParamsNumberOfVariables % foldingFactor[0]
+	finalSumcheckRounds := (mvParamsNumberOfVariables - foldingFactor[0]) % foldingFactor[len(foldingFactor)-1]
 	domainSize := (2 << mvParamsNumberOfVariables) * (1 << cfg.Rate) / 2
 	oodSamples := cfg.OODSamples
 	numOfQueries := cfg.NumQueries
@@ -863,17 +844,12 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		contTranscript[i] = uints.NewU8(cfg.Transcript[i])
 	}
 
-	linearStatementValuesAtPoints := make([]frontend.Variable, len(proof_arg.StatementValuesAtRandomPoint))
-	contLinearStatementValuesAtPoints := make([]frontend.Variable, len(proof_arg.StatementValuesAtRandomPoint))
+	affineStatementPoints := make([]frontend.Variable, mvParamsNumberOfVariables)
+	affineStatementEvaluations := make([]frontend.Variable, mvParamsNumberOfVariables)
 
-	linearStatementEvaluations := make([]frontend.Variable, len(cfg.StatementEvaluations))
-	contLinearStatementEvaluations := make([]frontend.Variable, len(cfg.StatementEvaluations))
-	for i := range len(proof_arg.StatementValuesAtRandomPoint) {
-		linearStatementValuesAtPoints[i] = typeConverters.LimbsToBigIntMod(proof_arg.StatementValuesAtRandomPoint[i].Limbs)
-		contLinearStatementValuesAtPoints[i] = typeConverters.LimbsToBigIntMod(proof_arg.StatementValuesAtRandomPoint[i].Limbs)
-		x, _ := new(big.Int).SetString(cfg.StatementEvaluations[i], 10)
-		linearStatementEvaluations[i] = frontend.Variable(x)
-		contLinearStatementEvaluations[i] = frontend.Variable(x)
+	for i := range mvParamsNumberOfVariables {
+		affineStatementPoints[i] = frontend.Variable(0)
+		affineStatementEvaluations[i] = frontend.Variable(0)
 	}
 
 	var circuit = Circuit{
@@ -887,7 +863,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
-		FoldingFactor:                        foldingFactor[0],
+		FoldingFactor:                        foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		PowBits:                              powBits,
@@ -896,8 +872,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
-		LinearStatementEvaluations:           contLinearStatementEvaluations,
-		LinearStatementValuesAtPoints:        contLinearStatementValuesAtPoints,
+		AffineStatementPoints:                affineStatementPoints,
+		AffineStatementEvaluations:           affineStatementEvaluations,
 		Leaves:                               containerTotalLeaves,
 		LeafIndexes:                          containerTotalLeafIndexes,
 		LeafSiblingHashes:                    containerTotalLeafSiblingHashes,
@@ -915,7 +891,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		StartingDomainBackingDomainGenerator: startingDomainGen,
-		FoldingFactor:                        foldingFactor[0],
+		FoldingFactor:                        foldingFactor,
 		PowBits:                              powBits,
 		FinalPowBits:                         0,
 		FinalFoldingPowBits:                  0,
@@ -927,8 +903,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      statementPoints,
 		StatementEvaluations:                 0,
-		LinearStatementEvaluations:           linearStatementEvaluations,
-		LinearStatementValuesAtPoints:        linearStatementValuesAtPoints,
+		AffineStatementPoints:                affineStatementPoints,
+		AffineStatementEvaluations:           affineStatementEvaluations,
 		Leaves:                               totalLeaves,
 		LeafIndexes:                          totalLeafIndexes,
 		LeafSiblingHashes:                    totalLeafSiblingHashes,
