@@ -24,7 +24,7 @@ type Circuit struct {
 	DomainSize                           int
 	StartingDomainBackingDomainGenerator frontend.Variable
 	CommittmentOODSamples                int
-	FoldingFactor                        int
+	FoldingFactorArray                   []int
 	FinalSumcheckRounds                  int
 	ParamNRounds                         int
 	MVParamsNumberOfVariables            int
@@ -96,8 +96,9 @@ func GetStirChallenges(
 	arthur gnark_nimue.Arthur,
 	numQueries int,
 	domainSize int,
+	roundIndex int,
 ) ([]frontend.Variable, error) {
-	foldedDomainSize := domainSize / (1 << circuit.FoldingFactor)
+	foldedDomainSize := domainSize / (1 << circuit.FoldingFactorArray[roundIndex])
 	domainSizeBytes := (bits.Len(uint(foldedDomainSize*2-1)) - 1 + 7) / 8
 
 	stirQueries := make([]uints.U8, domainSizeBytes*numQueries)
@@ -238,8 +239,7 @@ func initialSumcheck(
 ) {
 
 	checkTheVeryFirstSumcheck(api, circuit, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
-
-	for roundIndex := 1; roundIndex < circuit.FoldingFactor; roundIndex++ {
+	for roundIndex := 1; roundIndex < circuit.FoldingFactorArray[0]; roundIndex++ {
 		evaluatedPolyAtRandomness := evaluateFunction(
 			api,
 			sumcheckRounds[roundIndex-1][0],
@@ -379,7 +379,7 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][
 
 	for r := range oodPointLists {
 		newTmpArr := make([]frontend.Variable, len(oodPointLists[r])+len(stirChallengesPoints[r]))
-		numberVars -= circuit.FoldingFactor
+		numberVars -= circuit.FoldingFactorArray[r]
 		for i := range oodPointLists[r] {
 			newTmpArr[i] = oodPointLists[r][i]
 		}
@@ -474,12 +474,12 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	}
 
 	// TODO: remove this after Spartan verifier is done
-	t_rand := make([]frontend.Variable, 3)
+	t_rand := make([]frontend.Variable, 14)
 	if err = arthur.FillChallengeScalars(t_rand); err != nil {
 		return err
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 14; i++ {
 		sp := make([]frontend.Variable, 4)
 		if err = arthur.FillNextScalars(sp); err != nil {
 			return err
@@ -495,7 +495,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	perRoundCombinationRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	exp := uint64(1 << circuit.FoldingFactor)
+	exp := uint64(1 << circuit.FoldingFactorArray[0])
 	expDomainGenerator := Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(exp))
 	domainSize := circuit.DomainSize
 
@@ -524,8 +524,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	initialCombinationRandomness = make([]frontend.Variable, circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 
-	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor)
-	for i := range circuit.FoldingFactor {
+	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactorArray[0])
+	for i := range circuit.FoldingFactorArray[0] {
 		sumcheckRounds[i] = make([][]frontend.Variable, 2)
 		sumcheckPolynomialEvals := make([]frontend.Variable, 3)
 
@@ -577,7 +577,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			oodAnswersList[r] = oodAnswers
 		}
 
-		indexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize)
+		indexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize, r)
 		if err != nil {
 			return err
 		}
@@ -610,10 +610,10 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		combinationRandomness := ExpandRandomness(api, combRandomnessGen[0], len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
 		perRoundCombinationRandomness[r] = combinationRandomness
 
-		finalFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor)
-		sumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor)
+		finalFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactorArray[r])
+		sumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactorArray[r])
 
-		for i := range circuit.FoldingFactor {
+		for i := range circuit.FoldingFactorArray[r] {
 			sumcheckPoly := make([]frontend.Variable, 3)
 			if err = arthur.FillNextScalars(sumcheckPoly); err != nil {
 				return err
@@ -636,7 +636,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize)
+	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize, len(circuit.FoldingFactorArray)-1)
 	if err != nil {
 		api.Println(err)
 		return nil
@@ -884,7 +884,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
-		FoldingFactor:                        foldingFactor[0],
+		FoldingFactorArray:                   foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		PowBits:                              powBits,
@@ -912,7 +912,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		StartingDomainBackingDomainGenerator: startingDomainGen,
-		FoldingFactor:                        foldingFactor[0],
+		FoldingFactorArray:                   foldingFactor,
 		PowBits:                              powBits,
 		FinalPowBits:                         0,
 		FinalFoldingPowBits:                  0,
