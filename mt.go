@@ -44,6 +44,7 @@ type Circuit struct {
 	StatementEvaluations                 int
 	LinearStatementValuesAtPoints        []frontend.Variable
 	LinearStatementEvaluations           []frontend.Variable
+	NVars                                int
 	// Public Input
 	IO         []byte
 	Transcript []uints.U8 `gnark:",public"`
@@ -461,6 +462,18 @@ func ComputeFolds(api frontend.API, circuit *Circuit, sumcheckRounds [][][]front
 	}
 }
 
+func evaluateCubicPolynomial(api frontend.API, coefficients []frontend.Variable, point frontend.Variable) frontend.Variable {
+	return api.Add(coefficients[0], api.Mul(point, api.Add(coefficients[1], api.Mul(point, api.Add(coefficients[2], api.Mul(point, coefficients[3]))))))
+}
+
+func calculateEQ(api frontend.API, alphas []frontend.Variable, r []frontend.Variable) frontend.Variable {
+	ans := frontend.Variable(1)
+	for i, alpha := range alphas {
+		ans = api.Mul(ans, api.Add(api.Mul(alpha, r[i]), api.Mul(api.Sub(frontend.Variable(1), alpha), api.Sub(frontend.Variable(1), r[i]))))
+	}
+	return ans
+}
+
 func (circuit *Circuit) Define(api frontend.API) error {
 	sc := skyscraper.NewSkyscraper(api, 2)
 	arthur, err := gnark_nimue.NewSkyscraperArthur(api, sc, circuit.IO, circuit.Transcript[:])
@@ -474,20 +487,27 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	}
 
 	// TODO: remove this after Spartan verifier is done
-	t_rand := make([]frontend.Variable, 3)
+	t_rand := make([]frontend.Variable, circuit.NVars)
 	if err = arthur.FillChallengeScalars(t_rand); err != nil {
 		return err
 	}
 
-	for i := 0; i < 3; i++ {
+	savedValForSumcheck := frontend.Variable(0)
+
+	sp_rand := make([]frontend.Variable, circuit.NVars)
+	sp_rand_temp := make([]frontend.Variable, 1)
+	for i := 0; i < circuit.NVars; i++ {
 		sp := make([]frontend.Variable, 4)
 		if err = arthur.FillNextScalars(sp); err != nil {
 			return err
 		}
-		sp_rand := make([]frontend.Variable, 1)
-		if err = arthur.FillChallengeScalars(sp_rand); err != nil {
+		if err = arthur.FillChallengeScalars(sp_rand_temp); err != nil {
 			return err
 		}
+		sp_rand[i] = sp_rand_temp[0]
+		sumcheckVal := api.Add(evaluateCubicPolynomial(api, sp, frontend.Variable(0)), evaluateCubicPolynomial(api, sp, frontend.Variable(1)))
+		api.AssertIsEqual(sumcheckVal, savedValForSumcheck)
+		savedValForSumcheck = evaluateCubicPolynomial(api, sp, sp_rand[i])
 	}
 
 	finalFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
@@ -514,15 +534,13 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	initialCombinationRandomness := make([]frontend.Variable, 1)
 	// if circuit.InitialStatement {
 	combinationRandomnessGenerator := make([]frontend.Variable, 1)
 	if err = arthur.FillChallengeScalars(combinationRandomnessGenerator); err != nil {
 		return err
 	}
 
-	initialCombinationRandomness = make([]frontend.Variable, circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
-	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
+	initialCombinationRandomness := ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 
 	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor)
 	for i := range circuit.FoldingFactor {
@@ -657,6 +675,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	if err != nil {
 		return err
 	}
+
 	if circuit.FinalPowBits > 0 {
 		_, _, err := PoW(api, sc, arthur, circuit.FinalPowBits)
 		if err != nil {
@@ -690,6 +709,10 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	}
 
 	checkMainRounds(api, circuit, sumcheckRounds, sumcheckPolynomials, finalFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckRounds)
+
+	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
+
+	api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
 }
 
@@ -888,7 +911,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		PowBits:                              powBits,
-		FinalPowBits:                         0,
+		FinalPowBits:                         cfg.FinalPowBits,
 		FinalFoldingPowBits:                  0,
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
@@ -899,6 +922,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		LeafIndexes:                          containerTotalLeafIndexes,
 		LeafSiblingHashes:                    containerTotalLeafSiblingHashes,
 		AuthPaths:                            containerTotalAuthPath,
+		NVars:                                cfg.NVars,
 	}
 
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
@@ -914,7 +938,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		StartingDomainBackingDomainGenerator: startingDomainGen,
 		FoldingFactor:                        foldingFactor[0],
 		PowBits:                              powBits,
-		FinalPowBits:                         0,
+		FinalPowBits:                         cfg.FinalPowBits,
 		FinalFoldingPowBits:                  0,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
@@ -930,6 +954,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		LeafIndexes:                          totalLeafIndexes,
 		LeafSiblingHashes:                    totalLeafSiblingHashes,
 		AuthPaths:                            totalAuthPath,
+		NVars:                                cfg.NVars,
 	}
 
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())

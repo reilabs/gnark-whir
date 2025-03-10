@@ -54,14 +54,14 @@ type Config struct {
 }
 
 func main() {
-	f, err := os.Open("../../ProveKit/prover/proof")
+	f, err := os.Open("../ProveKit/prover/proof")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer f.Close()
 
-	params, err := os.ReadFile("../../ProveKit/prover/params")
+	params, err := os.ReadFile("../ProveKit/prover/params")
 	if err != nil {
 		fmt.Println(err)
 		return
