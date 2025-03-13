@@ -205,6 +205,16 @@ func FillInOODPointsAndAnswers(oodPoints *[]frontend.Variable, oodAnswers *[]fro
 	return nil
 }
 
+func RunPoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arthur, difficulty int) error {
+	if difficulty > 0 {
+		_, _, err := utilities.PoW(api, sc, arthur, difficulty)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nimue.Arthur, api frontend.API, sc *skyscraper.Skyscraper, NpowBits int) ([][]frontend.Variable, []frontend.Variable, error) {
 	finalSumcheckPolynomials := make([][]frontend.Variable, NVars)
 	finalSumcheckRandomness := make([]frontend.Variable, NVars)
@@ -222,8 +232,8 @@ func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nim
 		}
 
 		finalSumcheckRandomness[i] = finalSumcheckRanomnessTemp[0]
-		if NpowBits > 0 {
-			utilities.PoW(api, sc, arthur, NpowBits)
+		if err := RunPoW(api, sc, arthur, NpowBits); err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -519,22 +529,17 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	if err != nil {
 		return err
 	}
-
 	uapi, err := uints.New[uints.U64](api)
 	if err != nil {
 		return err
 	}
-
 	t_rand, sp_rand, savedValForSumcheck, err := SumcheckForR1CSIOP(api, arthur, circuit)
 	if err != nil {
 		return err
 	}
-
-	err = FillInAndVerifyRootHash(0, api, uapi, sc, circuit, arthur)
-	if err != nil {
+	if err = FillInAndVerifyRootHash(0, api, uapi, sc, circuit, arthur); err != nil {
 		return err
 	}
-
 	initialOODQueries, sumcheckRounds, initialCombinationRandomness, err := initialSumcheck(api, circuit, arthur)
 	if err != nil {
 		return err
@@ -548,44 +553,30 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	exp := uint64(1 << circuit.FoldingFactor)
 	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(exp))
 	domainSize := circuit.DomainSize
-
 	stirChallengesPoints := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 
 	for r := range circuit.RoundParametersOODSamples {
-		err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur)
-		if err != nil {
+		if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
 			return err
 		}
-
-		err = FillInOODPointsAndAnswers(&oodPointsList[r], &oodAnswersList[r], circuit.RoundParametersOODSamples[r], arthur)
-		if err != nil {
+		if err = FillInOODPointsAndAnswers(&oodPointsList[r], &oodAnswersList[r], circuit.RoundParametersOODSamples[r], arthur); err != nil {
 			return err
 		}
-
 		stirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator)
 		if err != nil {
 			return err
 		}
-
-		if circuit.PowBits[r] > 0 {
-			_, _, err := utilities.PoW(api, sc, arthur, circuit.PowBits[r])
-			if err != nil {
-				return err
-			}
-			// api.Println(challenge)
-			// api.Println(nonce)
+		if err = RunPoW(api, sc, arthur, circuit.PowBits[r]); err != nil {
+			return err
 		}
-
 		perRoundCombinationRandomness[r], err = GenerateCombinationRandomness(api, arthur, len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
 		if err != nil {
 			return err
 		}
-
 		sumcheckPolynomials[r], finalFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
 		if err != nil {
 			return nil
 		}
-
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
 
@@ -594,31 +585,19 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	if err = arthur.FillNextScalars(finalCoefficients); err != nil {
 		return err
 	}
-
 	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator)
-
 	if err != nil {
 		return err
 	}
-
-	if circuit.FinalPowBits > 0 {
-		_, _, err := utilities.PoW(api, sc, arthur, circuit.FinalPowBits)
-		if err != nil {
-			return err
-		}
-		// api.Println(finalChallenge)
-		// api.Println(finalNonce)
+	if err = RunPoW(api, sc, arthur, circuit.FinalPowBits); err != nil {
+		return err
 	}
-
 	finalSumcheckPolynomials, finalSumcheckRandomness, err := FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FinalSumcheckRounds, arthur, api, sc, circuit.FinalFoldingPowBits)
 	if err != nil {
 		return err
 	}
-
 	checkMainRounds(api, circuit, sumcheckRounds, sumcheckPolynomials, finalFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckPolynomials)
-
 	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
-
 	api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
 }
