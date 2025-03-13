@@ -205,6 +205,27 @@ func FillInOODPointsAndAnswers(oodPoints *[]frontend.Variable, oodAnswers *[]fro
 	return nil
 }
 
+func GenerateFinalRandomnessPoints(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit, domainSize int, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable) ([]frontend.Variable, error) {
+	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize)
+	if err != nil {
+		api.Println(err)
+		return []frontend.Variable{}, err
+	}
+
+	err = utilities.IsSubset(api, uapi, arthur, finalIndexes, circuit.LeafIndexes[len(circuit.LeafIndexes)-1])
+	if err != nil {
+		return []frontend.Variable{}, err
+	}
+
+	finalRandomnessPoints := make([]frontend.Variable, len(circuit.LeafIndexes[len(circuit.LeafIndexes)-1]))
+
+	for index := range circuit.LeafIndexes[len(circuit.LeafIndexes)-1] {
+		finalRandomnessPoints[index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.LeafIndexes[len(circuit.LeafIndexes)-1][index])
+	}
+
+	return finalRandomnessPoints, nil
+}
+
 func checkMainRounds(
 	api frontend.API,
 	circuit *Circuit,
@@ -560,21 +581,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize)
-	if err != nil {
-		api.Println(err)
-		return nil
-	}
-
-	err = utilities.IsSubset(api, uapi, arthur, finalIndexes, circuit.LeafIndexes[len(circuit.LeafIndexes)-1])
+	finalRandomnessPoints, err := GenerateFinalRandomnessPoints(api, arthur, circuit, domainSize, uapi, expDomainGenerator)
 	if err != nil {
 		return err
-	}
-
-	finalRandomnessPoints := make([]frontend.Variable, len(circuit.LeafIndexes[len(circuit.LeafIndexes)-1]))
-
-	for index := range circuit.LeafIndexes[len(circuit.LeafIndexes)-1] {
-		finalRandomnessPoints[index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.LeafIndexes[len(circuit.LeafIndexes)-1][index])
 	}
 
 	err = VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], circuit.Leaves[len(circuit.LeafIndexes)-1], circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1], circuit.AuthPaths[len(circuit.LeafIndexes)-1], prevRoot)
