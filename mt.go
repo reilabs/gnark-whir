@@ -501,6 +501,18 @@ func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Ci
 	return t_rand, sp_rand, savedValForSumcheck, nil
 }
 
+func FillInAndVerifyRootHash(roundNum int, api frontend.API, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, circuit *Circuit, arthur gnark_nimue.Arthur) error {
+	rootHash := make([]frontend.Variable, 1)
+	if err := arthur.FillNextScalars(rootHash); err != nil {
+		return err
+	}
+	err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[roundNum], circuit.Leaves[roundNum], circuit.LeafSiblingHashes[roundNum], circuit.AuthPaths[roundNum], rootHash[0])
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (circuit *Circuit) Define(api frontend.API) error {
 	sc := skyscraper.NewSkyscraper(api, 2)
 	arthur, err := gnark_nimue.NewSkyscraperArthur(api, sc, circuit.IO, circuit.Transcript[:])
@@ -518,8 +530,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	rootHash := make([]frontend.Variable, 1)
-	if err = arthur.FillNextScalars(rootHash); err != nil {
+	err = FillInAndVerifyRootHash(0, api, uapi, sc, circuit, arthur)
+	if err != nil {
 		return err
 	}
 
@@ -537,21 +549,13 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(exp))
 	domainSize := circuit.DomainSize
 
-	roots := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	stirChallengesPoints := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	prevRoot := rootHash[0]
-	for r := range circuit.RoundParametersOODSamples {
-		roots[r] = make([]frontend.Variable, 1)
-		if err = arthur.FillNextScalars(roots[r]); err != nil {
-			return err
-		}
 
-		err = VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[r], circuit.Leaves[r], circuit.LeafSiblingHashes[r], circuit.AuthPaths[r], prevRoot)
+	for r := range circuit.RoundParametersOODSamples {
+		err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur)
 		if err != nil {
 			return err
 		}
-
-		prevRoot = roots[r][0]
 
 		err = FillInOODPointsAndAnswers(&oodPointsList[r], &oodAnswersList[r], circuit.RoundParametersOODSamples[r], arthur)
 		if err != nil {
@@ -584,6 +588,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
+
 	}
 	finalCoefficients := make([]frontend.Variable, 1<<circuit.FinalSumcheckRounds)
 	if err = arthur.FillNextScalars(finalCoefficients); err != nil {
@@ -592,11 +597,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator)
 
-	if err != nil {
-		return err
-	}
-
-	err = VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], circuit.Leaves[len(circuit.LeafIndexes)-1], circuit.LeafSiblingHashes[len(circuit.LeafIndexes)-1], circuit.AuthPaths[len(circuit.LeafIndexes)-1], prevRoot)
 	if err != nil {
 		return err
 	}
