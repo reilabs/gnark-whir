@@ -230,25 +230,36 @@ func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nim
 	return finalSumcheckPolynomials, finalSumcheckRandomness, nil
 }
 
-func GenerateFinalRandomnessPoints(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit, domainSize int, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable) ([]frontend.Variable, error) {
-	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize)
+func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQueries int, leafIndexes []uints.U64, domainSize int, circuit *Circuit, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable) ([]frontend.Variable, error) {
+	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, NQueries, domainSize)
 	if err != nil {
 		api.Println(err)
 		return []frontend.Variable{}, err
 	}
 
-	err = utilities.IsSubset(api, uapi, arthur, finalIndexes, circuit.LeafIndexes[len(circuit.LeafIndexes)-1])
+	err = utilities.IsSubset(api, uapi, arthur, finalIndexes, leafIndexes)
 	if err != nil {
 		return []frontend.Variable{}, err
 	}
 
-	finalRandomnessPoints := make([]frontend.Variable, len(circuit.LeafIndexes[len(circuit.LeafIndexes)-1]))
+	finalRandomnessPoints := make([]frontend.Variable, len(leafIndexes))
 
-	for index := range circuit.LeafIndexes[len(circuit.LeafIndexes)-1] {
-		finalRandomnessPoints[index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.LeafIndexes[len(circuit.LeafIndexes)-1][index])
+	for index := range leafIndexes {
+		finalRandomnessPoints[index] = utilities.Exponent(api, uapi, expDomainGenerator, leafIndexes[index])
 	}
 
 	return finalRandomnessPoints, nil
+}
+
+func GenerateCombinationRandomness(api frontend.API, arthur gnark_nimue.Arthur, randomnessLength int) ([]frontend.Variable, error) {
+	combRandomnessGen := make([]frontend.Variable, 1)
+	if err := arthur.FillChallengeScalars(combRandomnessGen); err != nil {
+		return []frontend.Variable{}, err
+	}
+
+	combinationRandomness := utilities.ExpandRandomness(api, combRandomnessGen[0], randomnessLength)
+	return combinationRandomness, nil
+
 }
 
 func checkMainRounds(
@@ -547,20 +558,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return err
 		}
 
-		indexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize)
+		stirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator)
 		if err != nil {
 			return err
-		}
-
-		err = utilities.IsSubset(api, uapi, arthur, indexes, circuit.LeafIndexes[r])
-		if err != nil {
-			return err
-		}
-		stirChallengesPoints[r] = make([]frontend.Variable, len(circuit.LeafIndexes[r]))
-
-		for index := range circuit.LeafIndexes[r] {
-			x := utilities.Exponent(api, uapi, expDomainGenerator, circuit.LeafIndexes[r][index])
-			stirChallengesPoints[r][index] = x
 		}
 
 		if circuit.PowBits[r] > 0 {
@@ -572,13 +572,10 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			// api.Println(nonce)
 		}
 
-		combRandomnessGen := make([]frontend.Variable, 1)
-		if err = arthur.FillChallengeScalars(combRandomnessGen); err != nil {
+		perRoundCombinationRandomness[r], err = GenerateCombinationRandomness(api, arthur, len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
+		if err != nil {
 			return err
 		}
-
-		combinationRandomness := utilities.ExpandRandomness(api, combRandomnessGen[0], len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
-		perRoundCombinationRandomness[r] = combinationRandomness
 
 		sumcheckPolynomials[r], finalFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
 		if err != nil {
@@ -593,7 +590,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	finalRandomnessPoints, err := GenerateFinalRandomnessPoints(api, arthur, circuit, domainSize, uapi, expDomainGenerator)
+	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator)
+
 	if err != nil {
 		return err
 	}
