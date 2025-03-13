@@ -205,11 +205,11 @@ func FillInOODPointsAndAnswers(oodPoints *[]frontend.Variable, oodAnswers *[]fro
 	return nil
 }
 
-func FillInFinalSumcheckPolynomialsAndRanomnessAndRunPoW(circuit *Circuit, arthur gnark_nimue.Arthur, api frontend.API, sc *skyscraper.Skyscraper) ([][]frontend.Variable, []frontend.Variable, error) {
-	finalSumcheckPolynomials := make([][]frontend.Variable, circuit.FinalSumcheckRounds)
-	finalSumcheckRandomness := make([]frontend.Variable, circuit.FinalSumcheckRounds)
+func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nimue.Arthur, api frontend.API, sc *skyscraper.Skyscraper, NpowBits int) ([][]frontend.Variable, []frontend.Variable, error) {
+	finalSumcheckPolynomials := make([][]frontend.Variable, NVars)
+	finalSumcheckRandomness := make([]frontend.Variable, NVars)
 
-	for i := range circuit.FinalSumcheckRounds {
+	for i := range NVars {
 		finalSumcheckPolynomials[i] = make([]frontend.Variable, 3) // Sumcheck polynomial in the evaluations form
 		finalSumcheckRanomnessTemp := make([]frontend.Variable, 1) // Sumcheck folding randomness
 
@@ -222,8 +222,8 @@ func FillInFinalSumcheckPolynomialsAndRanomnessAndRunPoW(circuit *Circuit, arthu
 		}
 
 		finalSumcheckRandomness[i] = finalSumcheckRanomnessTemp[0]
-		if circuit.FinalFoldingPowBits > 0 {
-			utilities.PoW(api, sc, arthur, circuit.FinalFoldingPowBits)
+		if NpowBits > 0 {
+			utilities.PoW(api, sc, arthur, NpowBits)
 		}
 	}
 
@@ -580,22 +580,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		combinationRandomness := utilities.ExpandRandomness(api, combRandomnessGen[0], len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
 		perRoundCombinationRandomness[r] = combinationRandomness
 
-		finalFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor)
-		sumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor)
-
-		for i := range circuit.FoldingFactor {
-			sumcheckPoly := make([]frontend.Variable, 3)
-			if err = arthur.FillNextScalars(sumcheckPoly); err != nil {
-				return err
-			}
-
-			sumcheckPolynomials[r][i] = sumcheckPoly
-
-			foldingRandomnessSingle := make([]frontend.Variable, 1)
-			if err = arthur.FillChallengeScalars(foldingRandomnessSingle); err != nil {
-				return err
-			}
-			finalFoldingRandomness[r][i] = foldingRandomnessSingle[0]
+		sumcheckPolynomials[r], finalFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
+		if err != nil {
+			return nil
 		}
 
 		domainSize /= 2
@@ -625,7 +612,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		// api.Println(finalNonce)
 	}
 
-	finalSumcheckPolynomials, finalSumcheckRandomness, err := FillInFinalSumcheckPolynomialsAndRanomnessAndRunPoW(circuit, arthur, api, sc)
+	finalSumcheckPolynomials, finalSumcheckRandomness, err := FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FinalSumcheckRounds, arthur, api, sc, circuit.FinalFoldingPowBits)
 	if err != nil {
 		return err
 	}
