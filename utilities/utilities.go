@@ -206,3 +206,11 @@ func IsSubset(api frontend.API, uapi *uints.BinaryField[uints.U64], arthur gnark
 	}
 	return nil
 }
+
+func DotProduct(api frontend.API, a []frontend.Variable, b []frontend.Variable) frontend.Variable {
+	var acc = frontend.Variable(0)
+	for i := range a {
+		acc = api.Add(acc, api.Mul(a[i], b[i]))
+	}
+	return acc
+}
