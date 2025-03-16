@@ -300,7 +300,6 @@ func checkMainRounds(
 ) {
 	computedFolds := ComputeFolds(api, circuit, sumcheckRounds, finalFoldingRandomness)
 
-	var lastEval frontend.Variable
 	prevPoly := sumcheckRounds[len(sumcheckRounds)-1][0][:]
 	prevRandomness := sumcheckRounds[len(sumcheckRounds)-1][1][0]
 
@@ -317,7 +316,6 @@ func checkMainRounds(
 		prevPoly = sumcheckPolynomials[roundIndex][0][:]
 		for polyIndex := 1; polyIndex < len(sumcheckPolynomials[roundIndex]); polyIndex++ {
 			eval := utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, sumcheckPolynomials[roundIndex][polyIndex-1], finalFoldingRandomness[roundIndex][polyIndex-1])
-			lastEval = eval
 
 			utilities.CheckSumOverBool(api, eval, sumcheckPolynomials[roundIndex][polyIndex])
 
@@ -325,12 +323,9 @@ func checkMainRounds(
 			prevRandomness = finalFoldingRandomness[roundIndex][polyIndex]
 		}
 
-		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(
-			api,
-			sumcheckPolynomials[roundIndex][len(sumcheckPolynomials[roundIndex])-1],
-			finalFoldingRandomness[roundIndex][len(sumcheckPolynomials[roundIndex])-1],
-		)
 	}
+
+	lastEval := utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, prevPoly, prevRandomness)
 
 	finalEvaluations := utilities.UnivarPoly(api, finalCoefficients, finalRandomnessPoints)
 
@@ -344,7 +339,6 @@ func checkMainRounds(
 
 		for round := 1; round < len(finalSumcheckPolynomials); round++ {
 			eval := utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, finalSumcheckPolynomials[round-1], finalSumcheckRandomness[round-1])
-			lastEval = eval
 			utilities.CheckSumOverBool(api, eval, finalSumcheckPolynomials[round])
 		}
 
