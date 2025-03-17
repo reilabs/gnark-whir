@@ -14,6 +14,14 @@ import (
 	"github.com/consensys/gnark/std/math/uints"
 )
 
+func computeFold(leaves [][]frontend.Variable, foldingRandomness []frontend.Variable, api frontend.API) []frontend.Variable {
+	computedFold := make([]frontend.Variable, len(leaves))
+	for j := range leaves {
+		computedFold[j] = utilities.MultivarPoly(leaves[j], foldingRandomness, api)
+	}
+	return computedFold
+}
+
 func (circuit *Circuit) Define(api frontend.API) error {
 	sc, arthur, uapi, err := initializeComponents(api, circuit)
 	if err != nil {
@@ -40,11 +48,14 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	domainSize := circuit.DomainSize
 	stirChallengesPoints := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 
+	lastEval := initialSumcheckData.LastEvaluationOfInitialSumcheck
+
 	for r := range circuit.RoundParametersOODSamples {
 		if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
 			return err
 		}
-		if err = FillInOODPointsAndAnswers(&oodPointsList[r], &oodAnswersList[r], circuit.RoundParametersOODSamples[r], arthur); err != nil {
+		oodPointsList[r], oodAnswersList[r], err = FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
+		if err != nil {
 			return err
 		}
 		stirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator)
@@ -58,10 +69,38 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
-		mainRoundSumcheckPolynomials[r], mainRoundFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
-		if err != nil {
-			return nil
+
+		computedFold := []frontend.Variable{}
+		if r == 0 {
+			computedFold = computeFold(circuit.Leaves[r], initialSumcheckData.InitialSumcheckFoldingRandomness, api)
+		} else {
+			computedFold = computeFold(circuit.Leaves[r], mainRoundFoldingRandomness[r-1], api)
 		}
+
+		currentValues := append(oodAnswersList[r], computedFold...)
+		temp := utilities.DotProduct(api, currentValues, perRoundCombinationRandomness[r])
+		lastEval = api.Add(lastEval, temp)
+		// mainRoundSumcheckPolynomials[r], mainRoundFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
+		mainRoundSumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor)
+		mainRoundFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor)
+
+		for i := range circuit.FoldingFactor {
+			mainRoundSumcheckPolynomials[r][i] = make([]frontend.Variable, 3) // Sumcheck polynomial in the evaluations form
+			sumcheckRanomnessTemp := make([]frontend.Variable, 1)             // Sumcheck folding randomness
+
+			if err := arthur.FillNextScalars(mainRoundSumcheckPolynomials[r][i]); err != nil {
+				return err
+			}
+
+			if err := arthur.FillChallengeScalars(sumcheckRanomnessTemp); err != nil {
+				return err
+			}
+
+			mainRoundFoldingRandomness[r][i] = sumcheckRanomnessTemp[0]
+			utilities.CheckSumOverBool(api, lastEval, mainRoundSumcheckPolynomials[r][i])
+			lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, mainRoundSumcheckPolynomials[r][i], mainRoundFoldingRandomness[r][i])
+		}
+
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
 
@@ -72,11 +111,56 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	finalSumcheckPolynomials, finalSumcheckRandomness, err := FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FinalSumcheckRounds, arthur, api, sc, circuit.FinalFoldingPowBits)
-	if err != nil {
-		return err
+	finalEvaluations := utilities.UnivarPoly(api, finalCoefficients, finalRandomnessPoints)
+
+	finalFolds := computeFold(circuit.Leaves[len(circuit.RoundParametersOODSamples)], mainRoundFoldingRandomness[len(circuit.RoundParametersOODSamples)-1], api)
+
+	for foldIndex := range finalFolds {
+		api.AssertIsEqual(finalFolds[foldIndex], finalEvaluations[foldIndex])
 	}
-	checkMainRounds(api, circuit, initialSumcheckData, mainRoundSumcheckPolynomials, mainRoundFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckPolynomials)
+
+	sumcheckPolynomial := make([]frontend.Variable, 3)
+	finalSumcheckRandomness := make([]frontend.Variable, circuit.FinalSumcheckRounds)
+	finalSumcheckRandomnessTemp := make([]frontend.Variable, 1)
+	for i := range circuit.FinalSumcheckRounds {
+		if err := arthur.FillNextScalars(sumcheckPolynomial); err != nil {
+			return err
+		}
+
+		if err := arthur.FillChallengeScalars(finalSumcheckRandomnessTemp); err != nil {
+			return err
+		}
+		finalSumcheckRandomness[i] = finalSumcheckRandomnessTemp[0]
+		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
+		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, sumcheckPolynomial, finalSumcheckRandomness[i])
+	}
+
+	if circuit.FinalFoldingPowBits > 0 {
+		_, _, err := utilities.PoW(api, sc, arthur, circuit.FinalFoldingPowBits)
+		if err != nil {
+			return err
+		}
+	}
+
+	evaluationOfVPoly := ComputeVPoly(
+		api,
+		circuit,
+		mainRoundFoldingRandomness,
+		initialSumcheckData.InitialSumcheckFoldingRandomness,
+		initialSumcheckData.InitialOODQueries,
+		circuit.StatementPoints,
+		initialSumcheckData.InitialCombinationRandomness,
+		oodPointsList,
+		stirChallengesPoints,
+		perRoundCombinationRandomness,
+		finalSumcheckRandomness,
+	)
+
+	api.AssertIsEqual(
+		lastEval,
+		api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
+	)
+
 	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
 	api.AssertIsEqual(savedValForSumcheck, x)
 	return nil

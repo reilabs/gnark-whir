@@ -134,24 +134,17 @@ func initialSumcheck(
 		return InitialSumcheckData{}, err
 	}
 
-	initialOODQueries := make([]frontend.Variable, circuit.CommittmentOODSamples)
-	if err := arthur.FillChallengeScalars(initialOODQueries); err != nil {
+	initialOODQueries, initialOODAnswers, err := FillInOODPointsAndAnswers(circuit.CommittmentOODSamples, arthur)
+	if err != nil {
 		return InitialSumcheckData{}, err
 	}
 
-	initialOODAnswers := make([]frontend.Variable, circuit.CommittmentOODSamples)
-	if err := arthur.FillNextScalars(initialOODAnswers); err != nil {
+	initialCombinationRandomness, err := GenerateCombinationRandomness(api, arthur, circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
+	if err != nil {
 		return InitialSumcheckData{}, err
 	}
 
 	initialSumcheckFoldingRandomness := make([]frontend.Variable, circuit.FoldingFactor)
-
-	combinationRandomnessGenerator := make([]frontend.Variable, 1)
-	if err := arthur.FillChallengeScalars(combinationRandomnessGenerator); err != nil {
-		return InitialSumcheckData{}, err
-	}
-
-	initialCombinationRandomness := utilities.ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 
 	sumcheckPolynomial := make([]frontend.Variable, 3)
 	sumcheckFoldingRandomness := make([]frontend.Variable, 1)
@@ -169,7 +162,6 @@ func initialSumcheck(
 		}
 		initialSumcheckFoldingRandomness[i] = sumcheckFoldingRandomness[0]
 		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
-		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
 
 		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(
 			api,
@@ -186,21 +178,19 @@ func initialSumcheck(
 	}, nil
 }
 
-func FillInOODPointsAndAnswers(oodPoints *[]frontend.Variable, oodAnswers *[]frontend.Variable, numberOfOODPoints int, arthur gnark_nimue.Arthur) error {
-	*oodPoints = make([]frontend.Variable, numberOfOODPoints)
-	*oodAnswers = make([]frontend.Variable, numberOfOODPoints)
+func FillInOODPointsAndAnswers(numberOfOODPoints int, arthur gnark_nimue.Arthur) ([]frontend.Variable, []frontend.Variable, error) {
+	oodPoints := make([]frontend.Variable, numberOfOODPoints)
+	oodAnswers := make([]frontend.Variable, numberOfOODPoints)
 
-	if numberOfOODPoints > 0 {
-		if err := arthur.FillChallengeScalars(*oodPoints); err != nil {
-			return err
-		}
-
-		if err := arthur.FillNextScalars(*oodAnswers); err != nil {
-			return err
-		}
+	if err := arthur.FillChallengeScalars(oodPoints); err != nil {
+		return nil, nil, err
 	}
 
-	return nil
+	if err := arthur.FillNextScalars(oodAnswers); err != nil {
+		return nil, nil, err
+	}
+
+	return oodPoints, oodAnswers, nil
 }
 
 func RunPoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arthur, difficulty int) error {
@@ -283,62 +273,6 @@ func runSumcheckRounds(
 	return lastEval
 }
 
-func checkMainRounds(
-	api frontend.API,
-	circuit *Circuit,
-	initialSumcheckData InitialSumcheckData,
-	mainRoundSumcheckPolynomials [][][]frontend.Variable,
-	mainRoundFoldingRandomness [][]frontend.Variable,
-	oodPointsList [][]frontend.Variable,
-	oodAnswersList [][]frontend.Variable,
-	combinationRandomness [][]frontend.Variable,
-	finalCoefficients []frontend.Variable,
-	finalRandomnessPoints []frontend.Variable,
-	stirChallengesPoints [][]frontend.Variable,
-	perRoundCombinationRandomness [][]frontend.Variable,
-	finalSumcheckRandomness []frontend.Variable,
-	finalSumcheckPolynomials [][]frontend.Variable,
-) {
-	computedFolds := ComputeFolds(api, circuit, initialSumcheckData.InitialSumcheckFoldingRandomness, mainRoundFoldingRandomness)
-
-	lastEval := initialSumcheckData.LastEvaluationOfInitialSumcheck
-
-	for roundIndex, roundPolynomials := range mainRoundSumcheckPolynomials {
-		currentValues := append([]frontend.Variable{oodAnswersList[roundIndex][0]}, computedFolds[roundIndex]...)
-		lastEval = api.Add(lastEval, utilities.DotProduct(api, currentValues, combinationRandomness[roundIndex]))
-		lastEval = runSumcheckRounds(api, lastEval, roundPolynomials, mainRoundFoldingRandomness[roundIndex])
-	}
-
-	finalEvaluations := utilities.UnivarPoly(api, finalCoefficients, finalRandomnessPoints)
-
-	finalFolds := computedFolds[len(computedFolds)-1]
-	for foldIndex := range finalFolds {
-		api.AssertIsEqual(finalFolds[foldIndex], finalEvaluations[foldIndex])
-	}
-
-	if circuit.FinalSumcheckRounds > 0 {
-		lastEval = runSumcheckRounds(api, lastEval, finalSumcheckPolynomials, finalSumcheckRandomness)
-	}
-
-	evaluationOfVPoly := ComputeVPoly(
-		api,
-		circuit,
-		mainRoundFoldingRandomness,
-		initialSumcheckData.InitialSumcheckFoldingRandomness,
-		initialSumcheckData.InitialOODQueries,
-		circuit.StatementPoints,
-		initialSumcheckData.InitialCombinationRandomness,
-		oodPointsList,
-		stirChallengesPoints,
-		perRoundCombinationRandomness,
-		finalSumcheckRandomness,
-	)
-	api.AssertIsEqual(
-		lastEval,
-		api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
-	)
-}
-
 func ComputeVPoly(api frontend.API, circuit *Circuit, mainRoundFoldingRandomness [][]frontend.Variable, initialSumcheckFoldingRandomness []frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
 	foldingRandomness := make([]frontend.Variable, len(mainRoundFoldingRandomness[0])*len(mainRoundFoldingRandomness)+len(initialSumcheckFoldingRandomness)+len(finalSumcheckRandomness))
 	for j := range len(finalSumcheckRandomness) {
@@ -398,11 +332,10 @@ func ComputeFoldsHelped(api frontend.API, circuit *Circuit, initialSumcheckFoldi
 	result := make([][]frontend.Variable, len(circuit.Leaves))
 
 	for i := range len(circuit.Leaves) {
-		evaluations := make([]frontend.Variable, len(circuit.Leaves[i]))
+		result[i] = make([]frontend.Variable, len(circuit.Leaves[i]))
 		for j := range circuit.Leaves[i] {
-			evaluations[j] = utilities.MultivarPoly(circuit.Leaves[i][j], foldingRandomness[i], api)
+			result[i][j] = utilities.MultivarPoly(circuit.Leaves[i][j], foldingRandomness[i], api)
 		}
-		result[i] = evaluations
 	}
 
 	return result
