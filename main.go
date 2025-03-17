@@ -76,6 +76,10 @@ func main() {
 
 	var x ProofObject
 	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	fmt.Println(x.StatementValuesAtRandomPoint)
 	io := gnark_nimue.IOPattern{}
