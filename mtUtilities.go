@@ -147,19 +147,19 @@ func initialSumcheck(
 
 	initialOODQueries := make([]frontend.Variable, circuit.CommittmentOODSamples)
 	if err := arthur.FillChallengeScalars(initialOODQueries); err != nil {
-		return initialOODQueries, [][][]frontend.Variable{}, []frontend.Variable{}, err
+		return nil, nil, nil, err
 	}
 
 	initialOODAnswers := make([]frontend.Variable, circuit.CommittmentOODSamples)
 	if err := arthur.FillNextScalars(initialOODAnswers); err != nil {
-		return initialOODQueries, [][][]frontend.Variable{}, []frontend.Variable{}, err
+		return nil, nil, nil, err
 	}
 
 	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactor)
 
 	combinationRandomnessGenerator := make([]frontend.Variable, 1)
 	if err := arthur.FillChallengeScalars(combinationRandomnessGenerator); err != nil {
-		return initialOODQueries, sumcheckRounds, []frontend.Variable{}, err
+		return nil, nil, nil, err
 	}
 
 	initialCombinationRandomness := utilities.ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
@@ -169,12 +169,12 @@ func initialSumcheck(
 		sumcheckPolynomialEvals := make([]frontend.Variable, 3)
 
 		if err := arthur.FillNextScalars(sumcheckPolynomialEvals); err != nil {
-			return initialOODQueries, sumcheckRounds, initialCombinationRandomness, err
+			return nil, nil, nil, err
 		}
 
 		foldingRandomnessSingle := make([]frontend.Variable, 1)
 		if err := arthur.FillChallengeScalars(foldingRandomnessSingle); err != nil {
-			return initialOODQueries, sumcheckRounds, initialCombinationRandomness, err
+			return nil, nil, nil, err
 		}
 
 		sumcheckRounds[i][0] = sumcheckPolynomialEvals
@@ -232,11 +232,11 @@ func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nim
 		finalSumcheckRanomnessTemp := make([]frontend.Variable, 1) // Sumcheck folding randomness
 
 		if err := arthur.FillNextScalars(finalSumcheckPolynomials[i]); err != nil {
-			return finalSumcheckPolynomials, finalSumcheckRandomness, err
+			return nil, nil, err
 		}
 
 		if err := arthur.FillChallengeScalars(finalSumcheckRanomnessTemp); err != nil {
-			return finalSumcheckPolynomials, finalSumcheckRandomness, err
+			return nil, nil, err
 		}
 
 		finalSumcheckRandomness[i] = finalSumcheckRanomnessTemp[0]
@@ -252,12 +252,12 @@ func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQ
 	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, NQueries, domainSize)
 	if err != nil {
 		api.Println(err)
-		return []frontend.Variable{}, err
+		return nil, err
 	}
 
 	err = utilities.IsSubset(api, uapi, arthur, finalIndexes, leafIndexes)
 	if err != nil {
-		return []frontend.Variable{}, err
+		return nil, err
 	}
 
 	finalRandomnessPoints := make([]frontend.Variable, len(leafIndexes))
@@ -272,7 +272,7 @@ func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQ
 func GenerateCombinationRandomness(api frontend.API, arthur gnark_nimue.Arthur, randomnessLength int) ([]frontend.Variable, error) {
 	combRandomnessGen := make([]frontend.Variable, 1)
 	if err := arthur.FillChallengeScalars(combRandomnessGen); err != nil {
-		return []frontend.Variable{}, err
+		return nil, err
 	}
 
 	combinationRandomness := utilities.ExpandRandomness(api, combRandomnessGen[0], randomnessLength)
@@ -480,17 +480,17 @@ func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Ci
 
 	err := arthur.FillChallengeScalars(t_rand)
 	if err != nil {
-		return t_rand, sp_rand, savedValForSumcheck, err
+		return nil, nil, nil, err
 	}
 
 	sp_rand_temp := make([]frontend.Variable, 1)
 	for i := 0; i < circuit.NVars; i++ {
 		sp := make([]frontend.Variable, 4)
 		if err = arthur.FillNextScalars(sp); err != nil {
-			return t_rand, sp_rand, savedValForSumcheck, err
+			return nil, nil, nil, err
 		}
 		if err = arthur.FillChallengeScalars(sp_rand_temp); err != nil {
-			return t_rand, sp_rand, savedValForSumcheck, err
+			return nil, nil, nil, err
 		}
 		sp_rand[i] = sp_rand_temp[0]
 		sumcheckVal := api.Add(utilities.UnivarPoly(api, sp, []frontend.Variable{0})[0], utilities.UnivarPoly(api, sp, []frontend.Variable{1})[0])
