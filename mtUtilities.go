@@ -116,10 +116,11 @@ func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64]
 	return nil
 }
 
-func checkTheVeryFirstSumcheck(api frontend.API, circuit *Circuit, firstOODAnswers []frontend.Variable, initialCombinationRandomness []frontend.Variable, sumcheckPolynomial []frontend.Variable) {
-	OODAnswersAndStatmentEvaluations := append(firstOODAnswers, circuit.LinearStatementEvaluations...)
-	supposedSum := utilities.DotProduct(api, initialCombinationRandomness, OODAnswersAndStatmentEvaluations)
-	utilities.CheckSumOverBool(api, supposedSum, sumcheckPolynomial)
+type InitialSumcheckData struct {
+	InitialOODQueries                []frontend.Variable
+	LastEvaluationOfInitialSumcheck  frontend.Variable
+	InitialCombinationRandomness     []frontend.Variable
+	InitialSumcheckFoldingRandomness []frontend.Variable
 }
 
 func initialSumcheck(
@@ -128,58 +129,61 @@ func initialSumcheck(
 	arthur gnark_nimue.Arthur,
 	uapi *uints.BinaryField[uints.U64],
 	sc *skyscraper.Skyscraper,
-) ([]frontend.Variable, frontend.Variable, []frontend.Variable, []frontend.Variable, error) {
+) (InitialSumcheckData, error) {
 	if err := FillInAndVerifyRootHash(0, api, uapi, sc, circuit, arthur); err != nil {
-		return nil, nil, nil, nil, err
+		return InitialSumcheckData{}, err
 	}
 
 	initialOODQueries := make([]frontend.Variable, circuit.CommittmentOODSamples)
 	if err := arthur.FillChallengeScalars(initialOODQueries); err != nil {
-		return nil, nil, nil, nil, err
+		return InitialSumcheckData{}, err
 	}
 
 	initialOODAnswers := make([]frontend.Variable, circuit.CommittmentOODSamples)
 	if err := arthur.FillNextScalars(initialOODAnswers); err != nil {
-		return nil, nil, nil, nil, err
+		return InitialSumcheckData{}, err
 	}
 
 	initialSumcheckFoldingRandomness := make([]frontend.Variable, circuit.FoldingFactor)
 
 	combinationRandomnessGenerator := make([]frontend.Variable, 1)
 	if err := arthur.FillChallengeScalars(combinationRandomnessGenerator); err != nil {
-		return nil, nil, nil, nil, err
+		return InitialSumcheckData{}, err
 	}
 
 	initialCombinationRandomness := utilities.ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 
-	evaluatedPolyAtRandomness := frontend.Variable(0)
 	sumcheckPolynomial := make([]frontend.Variable, 3)
 	sumcheckFoldingRandomness := make([]frontend.Variable, 1)
 
+	OODAnswersAndStatmentEvaluations := append(initialOODAnswers, circuit.LinearStatementEvaluations...)
+	lastEval := utilities.DotProduct(api, initialCombinationRandomness, OODAnswersAndStatmentEvaluations)
+
 	for i := range circuit.FoldingFactor {
 		if err := arthur.FillNextScalars(sumcheckPolynomial); err != nil {
-			return nil, nil, nil, nil, err
+			return InitialSumcheckData{}, err
 		}
 
 		if err := arthur.FillChallengeScalars(sumcheckFoldingRandomness); err != nil {
-			return nil, nil, nil, nil, err
+			return InitialSumcheckData{}, err
 		}
 		initialSumcheckFoldingRandomness[i] = sumcheckFoldingRandomness[0]
+		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
+		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
 
-		if i == 0 {
-			checkTheVeryFirstSumcheck(api, circuit, initialOODAnswers, initialCombinationRandomness, sumcheckPolynomial)
-		} else {
-			utilities.CheckSumOverBool(api, evaluatedPolyAtRandomness, sumcheckPolynomial)
-		}
-
-		evaluatedPolyAtRandomness = utilities.EvaluateQuadraticPolynomialFromEvaluationList(
+		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(
 			api,
 			sumcheckPolynomial,
 			sumcheckFoldingRandomness[0],
 		)
 	}
 
-	return initialOODQueries, evaluatedPolyAtRandomness, initialCombinationRandomness, initialSumcheckFoldingRandomness, nil
+	return InitialSumcheckData{
+		InitialOODQueries:                initialOODQueries,
+		LastEvaluationOfInitialSumcheck:  lastEval,
+		InitialCombinationRandomness:     initialCombinationRandomness,
+		InitialSumcheckFoldingRandomness: initialSumcheckFoldingRandomness,
+	}, nil
 }
 
 func FillInOODPointsAndAnswers(oodPoints *[]frontend.Variable, oodAnswers *[]frontend.Variable, numberOfOODPoints int, arthur gnark_nimue.Arthur) error {
@@ -266,11 +270,23 @@ func GenerateCombinationRandomness(api frontend.API, arthur gnark_nimue.Arthur, 
 
 }
 
+func runSumcheckRounds(
+	api frontend.API,
+	lastEval frontend.Variable,
+	polynomials [][]frontend.Variable,
+	foldingRandomness []frontend.Variable,
+) frontend.Variable {
+	for i, poly := range polynomials {
+		utilities.CheckSumOverBool(api, lastEval, poly)
+		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, poly, foldingRandomness[i])
+	}
+	return lastEval
+}
+
 func checkMainRounds(
 	api frontend.API,
 	circuit *Circuit,
-	lastEvaluationOfInitialSumcheck frontend.Variable,
-	initialSumcheckFoldingRandomness []frontend.Variable,
+	initialSumcheckData InitialSumcheckData,
 	mainRoundSumcheckPolynomials [][][]frontend.Variable,
 	mainRoundFoldingRandomness [][]frontend.Variable,
 	oodPointsList [][]frontend.Variable,
@@ -278,31 +294,20 @@ func checkMainRounds(
 	combinationRandomness [][]frontend.Variable,
 	finalCoefficients []frontend.Variable,
 	finalRandomnessPoints []frontend.Variable,
-	initialOODQueries []frontend.Variable,
-	initialCombinationRandomness []frontend.Variable,
 	stirChallengesPoints [][]frontend.Variable,
 	perRoundCombinationRandomness [][]frontend.Variable,
 	finalSumcheckRandomness []frontend.Variable,
 	finalSumcheckPolynomials [][]frontend.Variable,
 ) {
-	computedFolds := ComputeFolds(api, circuit, initialSumcheckFoldingRandomness, mainRoundFoldingRandomness)
+	computedFolds := ComputeFolds(api, circuit, initialSumcheckData.InitialSumcheckFoldingRandomness, mainRoundFoldingRandomness)
 
-	lastEval := lastEvaluationOfInitialSumcheck
-	for roundIndex := range circuit.RoundParametersOODSamples {
+	lastEval := initialSumcheckData.LastEvaluationOfInitialSumcheck
+
+	for roundIndex, roundPolynomials := range mainRoundSumcheckPolynomials {
 		currentValues := append([]frontend.Variable{oodAnswersList[roundIndex][0]}, computedFolds[roundIndex]...)
-		valuesTimesCombRand := utilities.DotProduct(api, currentValues, combinationRandomness[roundIndex])
-		claimedSum := api.Add(lastEval, valuesTimesCombRand)
+		lastEval = api.Add(lastEval, utilities.DotProduct(api, currentValues, combinationRandomness[roundIndex]))
 
-		utilities.CheckSumOverBool(api, claimedSum, mainRoundSumcheckPolynomials[roundIndex][0])
-
-		for polyIndex := 1; polyIndex < len(mainRoundSumcheckPolynomials[roundIndex]); polyIndex++ {
-			eval := utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, mainRoundSumcheckPolynomials[roundIndex][polyIndex-1], mainRoundFoldingRandomness[roundIndex][polyIndex-1])
-
-			utilities.CheckSumOverBool(api, eval, mainRoundSumcheckPolynomials[roundIndex][polyIndex])
-
-			lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, mainRoundSumcheckPolynomials[roundIndex][polyIndex], mainRoundFoldingRandomness[roundIndex][polyIndex])
-		}
-
+		lastEval = runSumcheckRounds(api, lastEval, roundPolynomials, mainRoundFoldingRandomness[roundIndex])
 	}
 
 	finalEvaluations := utilities.UnivarPoly(api, finalCoefficients, finalRandomnessPoints)
@@ -313,28 +318,17 @@ func checkMainRounds(
 	}
 
 	if circuit.FinalSumcheckRounds > 0 {
-		utilities.CheckSumOverBool(api, lastEval, finalSumcheckPolynomials[0])
-
-		for round := 1; round < len(finalSumcheckPolynomials); round++ {
-			eval := utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, finalSumcheckPolynomials[round-1], finalSumcheckRandomness[round-1])
-			utilities.CheckSumOverBool(api, eval, finalSumcheckPolynomials[round])
-		}
-
-		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(
-			api,
-			finalSumcheckPolynomials[len(finalSumcheckPolynomials)-1],
-			finalSumcheckRandomness[len(finalSumcheckPolynomials)-1],
-		)
+		lastEval = runSumcheckRounds(api, lastEval, finalSumcheckPolynomials, finalSumcheckRandomness)
 	}
 
 	evaluationOfVPoly := ComputeVPoly(
 		api,
 		circuit,
 		mainRoundFoldingRandomness,
-		initialSumcheckFoldingRandomness,
-		initialOODQueries,
+		initialSumcheckData.InitialSumcheckFoldingRandomness,
+		initialSumcheckData.InitialOODQueries,
 		circuit.StatementPoints,
-		initialCombinationRandomness,
+		initialSumcheckData.InitialCombinationRandomness,
 		oodPointsList,
 		stirChallengesPoints,
 		perRoundCombinationRandomness,
