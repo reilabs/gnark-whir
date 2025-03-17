@@ -117,21 +117,9 @@ func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64]
 }
 
 func checkTheVeryFirstSumcheck(api frontend.API, circuit *Circuit, firstOODAnswers []frontend.Variable, initialCombinationRandomness []frontend.Variable, sumcheckRounds [][][]frontend.Variable) {
-	plugInEvaluation := frontend.Variable(0)
-	for i := range initialCombinationRandomness {
-		if i < len(firstOODAnswers) {
-			plugInEvaluation = api.Add(
-				plugInEvaluation,
-				api.Mul(initialCombinationRandomness[i], firstOODAnswers[i]),
-			)
-		} else {
-			plugInEvaluation = api.Add(
-				plugInEvaluation,
-				api.Mul(initialCombinationRandomness[i], circuit.LinearStatementEvaluations[i-len(firstOODAnswers)]),
-			)
-		}
-	}
-	utilities.CheckSumOverBool(api, plugInEvaluation, sumcheckRounds[0][0])
+	OODAnswersAndStatmentEvaluations := append(firstOODAnswers, circuit.LinearStatementEvaluations...)
+	supposedSum := utilities.DotProduct(api, initialCombinationRandomness, OODAnswersAndStatmentEvaluations)
+	utilities.CheckSumOverBool(api, supposedSum, sumcheckRounds[0][0])
 }
 
 func initialSumcheck(
@@ -166,19 +154,16 @@ func initialSumcheck(
 
 	for i := range circuit.FoldingFactor {
 		sumcheckRounds[i] = make([][]frontend.Variable, 2)
-		sumcheckPolynomialEvals := make([]frontend.Variable, 3)
+		sumcheckRounds[i][0] = make([]frontend.Variable, 3)
 
-		if err := arthur.FillNextScalars(sumcheckPolynomialEvals); err != nil {
+		if err := arthur.FillNextScalars(sumcheckRounds[i][0]); err != nil {
 			return nil, nil, nil, err
 		}
 
-		foldingRandomnessSingle := make([]frontend.Variable, 1)
-		if err := arthur.FillChallengeScalars(foldingRandomnessSingle); err != nil {
+		sumcheckRounds[i][1] = make([]frontend.Variable, 1)
+		if err := arthur.FillChallengeScalars(sumcheckRounds[i][1]); err != nil {
 			return nil, nil, nil, err
 		}
-
-		sumcheckRounds[i][0] = sumcheckPolynomialEvals
-		sumcheckRounds[i][1] = foldingRandomnessSingle
 	}
 
 	checkTheVeryFirstSumcheck(api, circuit, initialOODAnswers, initialCombinationRandomness, sumcheckRounds)
