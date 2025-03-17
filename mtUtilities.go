@@ -306,7 +306,6 @@ func checkMainRounds(
 	for roundIndex, roundPolynomials := range mainRoundSumcheckPolynomials {
 		currentValues := append([]frontend.Variable{oodAnswersList[roundIndex][0]}, computedFolds[roundIndex]...)
 		lastEval = api.Add(lastEval, utilities.DotProduct(api, currentValues, combinationRandomness[roundIndex]))
-
 		lastEval = runSumcheckRounds(api, lastEval, roundPolynomials, mainRoundFoldingRandomness[roundIndex])
 	}
 
@@ -395,41 +394,17 @@ func ComputeVPoly(api frontend.API, circuit *Circuit, mainRoundFoldingRandomness
 }
 
 func ComputeFoldsHelped(api frontend.API, circuit *Circuit, initialSumcheckFoldingRandomness []frontend.Variable, mainRoundFoldingRandomness [][]frontend.Variable) [][]frontend.Variable {
+	foldingRandomness := append([][]frontend.Variable{initialSumcheckFoldingRandomness}, mainRoundFoldingRandomness...)
 	result := make([][]frontend.Variable, len(circuit.Leaves))
 
-	for i := range len(circuit.Leaves) - 1 {
+	for i := range len(circuit.Leaves) {
 		evaluations := make([]frontend.Variable, len(circuit.Leaves[i]))
 		for j := range circuit.Leaves[i] {
-			lenAns := len(circuit.Leaves[i][j])
-			answerList := make([]frontend.Variable, lenAns)
-			for z := range lenAns {
-				answerList[z] = circuit.Leaves[i][j][z]
-			}
-			reverseRounds := make([]frontend.Variable, len(initialSumcheckFoldingRandomness))
-			if i == 0 {
-				for z := range len(initialSumcheckFoldingRandomness) {
-					reverseRounds[z] = initialSumcheckFoldingRandomness[z]
-				}
-			} else {
-				for z := range len(mainRoundFoldingRandomness[i-1]) {
-					reverseRounds[z] = mainRoundFoldingRandomness[i-1][z]
-				}
-			}
-			evaluations[j] = utilities.MultivarPoly(answerList, reverseRounds, api)
+			evaluations[j] = utilities.MultivarPoly(circuit.Leaves[i][j], foldingRandomness[i], api)
 		}
 		result[i] = evaluations
 	}
 
-	evaluations := make([]frontend.Variable, len(circuit.Leaves[len(circuit.Leaves)-1]))
-	for j := range circuit.Leaves[len(circuit.Leaves)-1] {
-		answListLen := len(circuit.Leaves[len(circuit.Leaves)-1][j])
-		answerList := make([]frontend.Variable, answListLen)
-		for z := range answListLen {
-			answerList[z] = circuit.Leaves[len(circuit.Leaves)-1][j][z]
-		}
-		evaluations[j] = utilities.MultivarPoly(answerList, mainRoundFoldingRandomness[len(mainRoundFoldingRandomness)-1], api)
-	}
-	result[len(result)-1] = evaluations
 	return result
 }
 
