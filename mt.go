@@ -25,7 +25,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	initialOODQueries, initialSumcheckRounds, initialCombinationRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
+	initialOODQueries, lastEvaluationOfInitialSumcheck, initialCombinationRandomness, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	if err != nil {
 		return err
 	}
-	checkMainRounds(api, circuit, initialSumcheckRounds, mainRoundSumcheckPolynomials, mainRoundFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckPolynomials)
+	checkMainRounds(api, circuit, lastEvaluationOfInitialSumcheck, initialSumcheckFoldingRandomness, mainRoundSumcheckPolynomials, mainRoundFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckPolynomials)
 	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
 	api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
