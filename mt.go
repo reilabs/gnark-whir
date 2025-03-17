@@ -25,13 +25,13 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	initialOODQueries, sumcheckRounds, initialCombinationRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
+	initialOODQueries, initialSumcheckRounds, initialCombinationRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
 	if err != nil {
 		return err
 	}
 
-	finalFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	sumcheckPolynomials := make([][][]frontend.Variable, len(circuit.RoundParametersOODSamples))
+	mainRoundFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
+	mainRoundSumcheckPolynomials := make([][][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	perRoundCombinationRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
@@ -58,7 +58,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
-		sumcheckPolynomials[r], finalFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
+		mainRoundSumcheckPolynomials[r], mainRoundFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
 		if err != nil {
 			return nil
 		}
@@ -76,7 +76,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	if err != nil {
 		return err
 	}
-	checkMainRounds(api, circuit, sumcheckRounds, sumcheckPolynomials, finalFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckPolynomials)
+	checkMainRounds(api, circuit, initialSumcheckRounds, mainRoundSumcheckPolynomials, mainRoundFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckPolynomials)
 	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
 	api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
