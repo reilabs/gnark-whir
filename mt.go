@@ -65,9 +65,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return err
 		}
 
-		currentValues := append(oodAnswersList[r], computedFold...)
-		temp := utilities.DotProduct(api, currentValues, perRoundCombinationRandomness[r])
-		lastEval = api.Add(lastEval, temp)
+		lastEval = api.Add(lastEval, calculateShiftValue(oodAnswersList[r], perRoundCombinationRandomness[r], computedFold, api))
 
 		mainRoundFoldingRandomness[r], lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
 		if err != nil {

@@ -405,3 +405,7 @@ func computeFold(leaves [][]frontend.Variable, foldingRandomness []frontend.Vari
 	}
 	return computedFold
 }
+
+func calculateShiftValue(oodAnswers []frontend.Variable, combinationRandomness []frontend.Variable, computedFold []frontend.Variable, api frontend.API) frontend.Variable {
+	return utilities.DotProduct(api, append(oodAnswers, computedFold...), combinationRandomness)
+}
