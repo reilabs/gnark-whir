@@ -25,59 +25,55 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	initialSumcheckData, err := initialSumcheck(api, circuit, arthur, uapi, sc)
+	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
 	if err != nil {
 		return err
 	}
 
-	computedFold := computeFold(circuit.Leaves[0], initialSumcheckData.InitialSumcheckFoldingRandomness, api)
+	computedFold := computeFold(circuit.Leaves[0], initialSumcheckFoldingRandomness, api)
 
-	mainRoundFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	perRoundCombinationRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	exp := uint64(1 << circuit.FoldingFactor)
-	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(exp))
+	mainRoundData := generateEmptyMainRoundData(circuit)
+	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(uint64(1<<circuit.FoldingFactor)))
 	domainSize := circuit.DomainSize
-	stirChallengesPoints := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 
-	lastEval := initialSumcheckData.LastEvaluationOfInitialSumcheck
-
-	totalFoldingRandomness := initialSumcheckData.InitialSumcheckFoldingRandomness
+	totalFoldingRandomness := initialSumcheckFoldingRandomness
 
 	for r := range circuit.RoundParametersOODSamples {
 		if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
 			return err
 		}
-		oodPointsList[r], oodAnswersList[r], err = FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
+
+		roundOODAnswers := []frontend.Variable{}
+		mainRoundData.OODPoints[r], roundOODAnswers, err = FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
 		if err != nil {
 			return err
 		}
-		stirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator)
+		mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator)
 		if err != nil {
 			return err
 		}
 		if err = RunPoW(api, sc, arthur, circuit.PowBits[r]); err != nil {
 			return err
 		}
-		perRoundCombinationRandomness[r], err = GenerateCombinationRandomness(api, arthur, len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
+
+		mainRoundData.CombinationRandomness[r], err = GenerateCombinationRandomness(api, arthur, len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
 		if err != nil {
 			return err
 		}
 
-		lastEval = api.Add(lastEval, calculateShiftValue(oodAnswersList[r], perRoundCombinationRandomness[r], computedFold, api))
+		lastEval = api.Add(lastEval, calculateShiftValue(roundOODAnswers, mainRoundData.CombinationRandomness[r], computedFold, api))
 
-		mainRoundFoldingRandomness[r], lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
+		roundFoldingRandomness := []frontend.Variable{}
+		roundFoldingRandomness, lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
 		if err != nil {
 			return nil
 		}
 
-		computedFold = computeFold(circuit.Leaves[r+1], mainRoundFoldingRandomness[r], api)
-		totalFoldingRandomness = append(totalFoldingRandomness, mainRoundFoldingRandomness[r]...)
+		computedFold = computeFold(circuit.Leaves[r+1], roundFoldingRandomness, api)
+		totalFoldingRandomness = append(totalFoldingRandomness, roundFoldingRandomness...)
 
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
-
 	}
 
 	finalCoefficients, finalRandomnessPoints, err := generateFinalCoefficientsAndRandomnessPoints(api, arthur, circuit, uapi, sc, domainSize, expDomainGenerator)
@@ -108,12 +104,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	evaluationOfVPoly := ComputeWPoly(
 		api,
 		circuit,
-		initialSumcheckData.InitialOODQueries,
-		circuit.StatementPoints,
-		initialSumcheckData.InitialCombinationRandomness,
-		oodPointsList,
-		stirChallengesPoints,
-		perRoundCombinationRandomness,
+		initialSumcheckData,
+		mainRoundData,
 		totalFoldingRandomness,
 	)
 

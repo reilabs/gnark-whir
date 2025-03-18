@@ -81,6 +81,20 @@ type Circuit struct {
 	Transcript []uints.U8 `gnark:",public"`
 }
 
+type MainRoundData struct {
+	OODPoints             [][]frontend.Variable
+	StirChallengesPoints  [][]frontend.Variable
+	CombinationRandomness [][]frontend.Variable
+}
+
+func generateEmptyMainRoundData(circuit *Circuit) MainRoundData {
+	return MainRoundData{
+		OODPoints:             make([][]frontend.Variable, len(circuit.RoundParametersOODSamples)),
+		StirChallengesPoints:  make([][]frontend.Variable, len(circuit.RoundParametersOODSamples)),
+		CombinationRandomness: make([][]frontend.Variable, len(circuit.RoundParametersOODSamples)),
+	}
+}
+
 func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, leafIndexes []uints.U64, leaves [][]frontend.Variable, leafSiblingHashes [][]uints.U8, authPaths [][][]uints.U8, rootHash frontend.Variable) error {
 	numOfLeavesProved := len(leaves)
 	for i := range numOfLeavesProved {
@@ -117,10 +131,8 @@ func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64]
 }
 
 type InitialSumcheckData struct {
-	InitialOODQueries                []frontend.Variable
-	LastEvaluationOfInitialSumcheck  frontend.Variable
-	InitialCombinationRandomness     []frontend.Variable
-	InitialSumcheckFoldingRandomness []frontend.Variable
+	InitialOODQueries            []frontend.Variable
+	InitialCombinationRandomness []frontend.Variable
 }
 
 func initialSumcheck(
@@ -129,19 +141,19 @@ func initialSumcheck(
 	arthur gnark_nimue.Arthur,
 	uapi *uints.BinaryField[uints.U64],
 	sc *skyscraper.Skyscraper,
-) (InitialSumcheckData, error) {
+) (InitialSumcheckData, frontend.Variable, []frontend.Variable, error) {
 	if err := FillInAndVerifyRootHash(0, api, uapi, sc, circuit, arthur); err != nil {
-		return InitialSumcheckData{}, err
+		return InitialSumcheckData{}, nil, nil, err
 	}
 
 	initialOODQueries, initialOODAnswers, err := FillInOODPointsAndAnswers(circuit.CommittmentOODSamples, arthur)
 	if err != nil {
-		return InitialSumcheckData{}, err
+		return InitialSumcheckData{}, nil, nil, err
 	}
 
 	initialCombinationRandomness, err := GenerateCombinationRandomness(api, arthur, circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 	if err != nil {
-		return InitialSumcheckData{}, err
+		return InitialSumcheckData{}, nil, nil, err
 	}
 
 	OODAnswersAndStatmentEvaluations := append(initialOODAnswers, circuit.LinearStatementEvaluations...)
@@ -149,15 +161,13 @@ func initialSumcheck(
 
 	initialSumcheckFoldingRandomness, lastEval, err := runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
 	if err != nil {
-		return InitialSumcheckData{}, err
+		return InitialSumcheckData{}, nil, nil, err
 	}
 
 	return InitialSumcheckData{
-		InitialOODQueries:                initialOODQueries,
-		LastEvaluationOfInitialSumcheck:  lastEval,
-		InitialCombinationRandomness:     initialCombinationRandomness,
-		InitialSumcheckFoldingRandomness: initialSumcheckFoldingRandomness,
-	}, nil
+		InitialOODQueries:            initialOODQueries,
+		InitialCombinationRandomness: initialCombinationRandomness,
+	}, lastEval, initialSumcheckFoldingRandomness, nil
 }
 
 func FillInOODPointsAndAnswers(numberOfOODPoints int, arthur gnark_nimue.Arthur) ([]frontend.Variable, []frontend.Variable, error) {
@@ -270,33 +280,29 @@ func runSumcheckRounds(
 func ComputeWPoly(
 	api frontend.API,
 	circuit *Circuit,
-	initialOODQueries []frontend.Variable,
-	statementPoints [][]frontend.Variable,
-	initialCombinationRandomness []frontend.Variable,
-	oodPointLists [][]frontend.Variable,
-	stirChallengesPoints [][]frontend.Variable,
-	perRoundCombinationRandomness [][]frontend.Variable,
+	initialSumcheckData InitialSumcheckData,
+	mainRoundData MainRoundData,
 	totalFoldingRandomness []frontend.Variable,
 ) frontend.Variable {
 	foldingRandomnessReversed := utilities.Reverse(totalFoldingRandomness)
 	numberVars := circuit.MVParamsNumberOfVariables
 
 	value := frontend.Variable(0)
-	for j := range initialOODQueries {
-		value = api.Add(value, api.Mul(initialCombinationRandomness[j], utilities.EqPolyOutside(api, utilities.ExpandFromUnivariate(api, initialOODQueries[j], numberVars), foldingRandomnessReversed)))
+	for j := range initialSumcheckData.InitialOODQueries {
+		value = api.Add(value, api.Mul(initialSumcheckData.InitialCombinationRandomness[j], utilities.EqPolyOutside(api, utilities.ExpandFromUnivariate(api, initialSumcheckData.InitialOODQueries[j], numberVars), foldingRandomnessReversed)))
 	}
 	for j := range circuit.LinearStatementValuesAtPoints {
-		value = api.Add(value, api.Mul(initialCombinationRandomness[len(initialOODQueries)+j], circuit.LinearStatementValuesAtPoints[j]))
+		value = api.Add(value, api.Mul(initialSumcheckData.InitialCombinationRandomness[len(initialSumcheckData.InitialOODQueries)+j], circuit.LinearStatementValuesAtPoints[j]))
 	}
 
-	for r := range oodPointLists {
+	for r := range mainRoundData.OODPoints {
 		numberVars -= circuit.FoldingFactor
-		newTmpArr := append(oodPointLists[r], stirChallengesPoints[r]...)
+		newTmpArr := append(mainRoundData.OODPoints[r], mainRoundData.StirChallengesPoints[r]...)
 
 		sumOfClaims := frontend.Variable(0)
 		for i := range newTmpArr {
 			point := utilities.ExpandFromUnivariate(api, newTmpArr[i], numberVars)
-			sumOfClaims = api.Add(sumOfClaims, api.Mul(utilities.EqPolyOutside(api, point, foldingRandomnessReversed[0:numberVars]), perRoundCombinationRandomness[r][i]))
+			sumOfClaims = api.Add(sumOfClaims, api.Mul(utilities.EqPolyOutside(api, point, foldingRandomnessReversed[0:numberVars]), mainRoundData.CombinationRandomness[r][i]))
 		}
 		value = api.Add(value, sumOfClaims)
 	}
