@@ -14,14 +14,6 @@ import (
 	"github.com/consensys/gnark/std/math/uints"
 )
 
-func computeFold(leaves [][]frontend.Variable, foldingRandomness []frontend.Variable, api frontend.API) []frontend.Variable {
-	computedFold := make([]frontend.Variable, len(leaves))
-	for j := range leaves {
-		computedFold[j] = utilities.MultivarPoly(leaves[j], foldingRandomness, api)
-	}
-	return computedFold
-}
-
 func (circuit *Circuit) Define(api frontend.API) error {
 	sc, arthur, uapi, err := initializeComponents(api, circuit)
 	if err != nil {
@@ -39,7 +31,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	}
 
 	mainRoundFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
-	mainRoundSumcheckPolynomials := make([][][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	perRoundCombinationRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
@@ -80,25 +71,10 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		currentValues := append(oodAnswersList[r], computedFold...)
 		temp := utilities.DotProduct(api, currentValues, perRoundCombinationRandomness[r])
 		lastEval = api.Add(lastEval, temp)
-		// mainRoundSumcheckPolynomials[r], mainRoundFoldingRandomness[r], err = FillInSumcheckPolynomialsAndRandomnessAndRunPoW(circuit.FoldingFactor, arthur, api, sc, 0)
-		mainRoundSumcheckPolynomials[r] = make([][]frontend.Variable, circuit.FoldingFactor)
-		mainRoundFoldingRandomness[r] = make([]frontend.Variable, circuit.FoldingFactor)
 
-		for i := range circuit.FoldingFactor {
-			mainRoundSumcheckPolynomials[r][i] = make([]frontend.Variable, 3) // Sumcheck polynomial in the evaluations form
-			sumcheckRanomnessTemp := make([]frontend.Variable, 1)             // Sumcheck folding randomness
-
-			if err := arthur.FillNextScalars(mainRoundSumcheckPolynomials[r][i]); err != nil {
-				return err
-			}
-
-			if err := arthur.FillChallengeScalars(sumcheckRanomnessTemp); err != nil {
-				return err
-			}
-
-			mainRoundFoldingRandomness[r][i] = sumcheckRanomnessTemp[0]
-			utilities.CheckSumOverBool(api, lastEval, mainRoundSumcheckPolynomials[r][i])
-			lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, mainRoundSumcheckPolynomials[r][i], mainRoundFoldingRandomness[r][i])
+		mainRoundFoldingRandomness[r], lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
+		if err != nil {
+			return nil
 		}
 
 		domainSize /= 2
@@ -119,20 +95,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		api.AssertIsEqual(finalFolds[foldIndex], finalEvaluations[foldIndex])
 	}
 
-	sumcheckPolynomial := make([]frontend.Variable, 3)
-	finalSumcheckRandomness := make([]frontend.Variable, circuit.FinalSumcheckRounds)
-	finalSumcheckRandomnessTemp := make([]frontend.Variable, 1)
-	for i := range circuit.FinalSumcheckRounds {
-		if err := arthur.FillNextScalars(sumcheckPolynomial); err != nil {
-			return err
-		}
-
-		if err := arthur.FillChallengeScalars(finalSumcheckRandomnessTemp); err != nil {
-			return err
-		}
-		finalSumcheckRandomness[i] = finalSumcheckRandomnessTemp[0]
-		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
-		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, sumcheckPolynomial, finalSumcheckRandomness[i])
+	finalSumcheckRandomness, lastEval, err := runSumcheckRounds(api, lastEval, arthur, circuit.FinalSumcheckRounds, 3)
+	if err != nil {
+		return err
 	}
 
 	if circuit.FinalFoldingPowBits > 0 {

@@ -144,30 +144,12 @@ func initialSumcheck(
 		return InitialSumcheckData{}, err
 	}
 
-	initialSumcheckFoldingRandomness := make([]frontend.Variable, circuit.FoldingFactor)
-
-	sumcheckPolynomial := make([]frontend.Variable, 3)
-	sumcheckFoldingRandomness := make([]frontend.Variable, 1)
-
 	OODAnswersAndStatmentEvaluations := append(initialOODAnswers, circuit.LinearStatementEvaluations...)
 	lastEval := utilities.DotProduct(api, initialCombinationRandomness, OODAnswersAndStatmentEvaluations)
 
-	for i := range circuit.FoldingFactor {
-		if err := arthur.FillNextScalars(sumcheckPolynomial); err != nil {
-			return InitialSumcheckData{}, err
-		}
-
-		if err := arthur.FillChallengeScalars(sumcheckFoldingRandomness); err != nil {
-			return InitialSumcheckData{}, err
-		}
-		initialSumcheckFoldingRandomness[i] = sumcheckFoldingRandomness[0]
-		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
-
-		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(
-			api,
-			sumcheckPolynomial,
-			sumcheckFoldingRandomness[0],
-		)
+	initialSumcheckFoldingRandomness, lastEval, err := runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
+	if err != nil {
+		return InitialSumcheckData{}, err
 	}
 
 	return InitialSumcheckData{
@@ -263,14 +245,26 @@ func GenerateCombinationRandomness(api frontend.API, arthur gnark_nimue.Arthur, 
 func runSumcheckRounds(
 	api frontend.API,
 	lastEval frontend.Variable,
-	polynomials [][]frontend.Variable,
-	foldingRandomness []frontend.Variable,
-) frontend.Variable {
-	for i, poly := range polynomials {
-		utilities.CheckSumOverBool(api, lastEval, poly)
-		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, poly, foldingRandomness[i])
+	arthur gnark_nimue.Arthur,
+	foldingFactor int,
+	polynomialDegree int,
+) ([]frontend.Variable, frontend.Variable, error) {
+	sumcheckPolynomial := make([]frontend.Variable, polynomialDegree)
+	foldingRandomness := make([]frontend.Variable, foldingFactor)
+	foldingRandomnessTemp := make([]frontend.Variable, 1)
+
+	for i := range foldingFactor {
+		if err := arthur.FillNextScalars(sumcheckPolynomial); err != nil {
+			return nil, nil, err
+		}
+		if err := arthur.FillChallengeScalars(foldingRandomnessTemp); err != nil {
+			return nil, nil, err
+		}
+		foldingRandomness[i] = foldingRandomnessTemp[0]
+		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
+		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, sumcheckPolynomial, foldingRandomness[i])
 	}
-	return lastEval
+	return foldingRandomness, lastEval, nil
 }
 
 func ComputeVPoly(api frontend.API, circuit *Circuit, mainRoundFoldingRandomness [][]frontend.Variable, initialSumcheckFoldingRandomness []frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
@@ -355,13 +349,13 @@ func ComputeFolds(api frontend.API, circuit *Circuit, initialSumcheckFoldingRand
 
 func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit) ([]frontend.Variable, []frontend.Variable, frontend.Variable, error) {
 	t_rand := make([]frontend.Variable, circuit.NVars)
-	sp_rand := make([]frontend.Variable, circuit.NVars)
-	savedValForSumcheck := frontend.Variable(0)
-
 	err := arthur.FillChallengeScalars(t_rand)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	sp_rand := make([]frontend.Variable, circuit.NVars)
+	savedValForSumcheck := frontend.Variable(0)
 
 	sp_rand_temp := make([]frontend.Variable, 1)
 	for i := 0; i < circuit.NVars; i++ {
@@ -419,4 +413,12 @@ func initializeComponents(api frontend.API, circuit *Circuit) (*skyscraper.Skysc
 		return nil, nil, nil, err
 	}
 	return sc, arthur, uapi, nil
+}
+
+func computeFold(leaves [][]frontend.Variable, foldingRandomness []frontend.Variable, api frontend.API) []frontend.Variable {
+	computedFold := make([]frontend.Variable, len(leaves))
+	for j := range leaves {
+		computedFold[j] = utilities.MultivarPoly(leaves[j], foldingRandomness, api)
+	}
+	return computedFold
 }
