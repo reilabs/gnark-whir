@@ -30,6 +30,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
+	computedFold := computeFold(circuit.Leaves[0], initialSumcheckData.InitialSumcheckFoldingRandomness, api)
+
 	mainRoundFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
@@ -63,13 +65,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return err
 		}
 
-		computedFold := []frontend.Variable{}
-		if r == 0 {
-			computedFold = computeFold(circuit.Leaves[r], initialSumcheckData.InitialSumcheckFoldingRandomness, api)
-		} else {
-			computedFold = computeFold(circuit.Leaves[r], mainRoundFoldingRandomness[r-1], api)
-		}
-
 		currentValues := append(oodAnswersList[r], computedFold...)
 		temp := utilities.DotProduct(api, currentValues, perRoundCombinationRandomness[r])
 		lastEval = api.Add(lastEval, temp)
@@ -79,6 +74,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return nil
 		}
 
+		computedFold = computeFold(circuit.Leaves[r+1], mainRoundFoldingRandomness[r], api)
 		totalFoldingRandomness = append(totalFoldingRandomness, mainRoundFoldingRandomness[r]...)
 
 		domainSize /= 2
@@ -93,10 +89,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	finalEvaluations := utilities.UnivarPoly(api, finalCoefficients, finalRandomnessPoints)
 
-	finalFolds := computeFold(circuit.Leaves[len(circuit.RoundParametersOODSamples)], mainRoundFoldingRandomness[len(circuit.RoundParametersOODSamples)-1], api)
-
-	for foldIndex := range finalFolds {
-		api.AssertIsEqual(finalFolds[foldIndex], finalEvaluations[foldIndex])
+	for foldIndex := range computedFold {
+		api.AssertIsEqual(computedFold[foldIndex], finalEvaluations[foldIndex])
 	}
 
 	finalSumcheckRandomness, lastEval, err := runSumcheckRounds(api, lastEval, arthur, circuit.FinalSumcheckRounds, 3)
