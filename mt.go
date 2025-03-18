@@ -41,6 +41,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	lastEval := initialSumcheckData.LastEvaluationOfInitialSumcheck
 
+	totalFoldingRandomness := initialSumcheckData.InitialSumcheckFoldingRandomness
+
 	for r := range circuit.RoundParametersOODSamples {
 		if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
 			return err
@@ -77,6 +79,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return nil
 		}
 
+		totalFoldingRandomness = append(totalFoldingRandomness, mainRoundFoldingRandomness[r]...)
+
 		domainSize /= 2
 		expDomainGenerator = api.Mul(expDomainGenerator, expDomainGenerator)
 
@@ -100,6 +104,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
+	totalFoldingRandomness = append(totalFoldingRandomness, finalSumcheckRandomness...)
+
 	if circuit.FinalFoldingPowBits > 0 {
 		_, _, err := utilities.PoW(api, sc, arthur, circuit.FinalFoldingPowBits)
 		if err != nil {
@@ -107,18 +113,16 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 	}
 
-	evaluationOfVPoly := ComputeVPoly(
+	evaluationOfVPoly := ComputeWPoly(
 		api,
 		circuit,
-		mainRoundFoldingRandomness,
-		initialSumcheckData.InitialSumcheckFoldingRandomness,
 		initialSumcheckData.InitialOODQueries,
 		circuit.StatementPoints,
 		initialSumcheckData.InitialCombinationRandomness,
 		oodPointsList,
 		stirChallengesPoints,
 		perRoundCombinationRandomness,
-		finalSumcheckRandomness,
+		totalFoldingRandomness,
 	)
 
 	api.AssertIsEqual(

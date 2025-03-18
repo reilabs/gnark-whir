@@ -267,53 +267,36 @@ func runSumcheckRounds(
 	return foldingRandomness, lastEval, nil
 }
 
-func ComputeVPoly(api frontend.API, circuit *Circuit, mainRoundFoldingRandomness [][]frontend.Variable, initialSumcheckFoldingRandomness []frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
-	foldingRandomness := make([]frontend.Variable, len(mainRoundFoldingRandomness[0])*len(mainRoundFoldingRandomness)+len(initialSumcheckFoldingRandomness)+len(finalSumcheckRandomness))
-	for j := range len(finalSumcheckRandomness) {
-		foldingRandomness[j] = finalSumcheckRandomness[len(finalSumcheckRandomness)-1-j]
-	}
-	ind := len(finalSumcheckRandomness)
-	for j := range len(mainRoundFoldingRandomness) {
-		for i := range len(mainRoundFoldingRandomness[j]) {
-			foldingRandomness[ind] = mainRoundFoldingRandomness[len(mainRoundFoldingRandomness)-1-j][len(mainRoundFoldingRandomness[j])-1-i]
-			ind = ind + 1
-		}
-	}
-	for j := range len(initialSumcheckFoldingRandomness) {
-		foldingRandomness[ind] = initialSumcheckFoldingRandomness[len(initialSumcheckFoldingRandomness)-1-j]
-		ind = ind + 1
-	}
-
-	numVariables := circuit.MVParamsNumberOfVariables
+func ComputeWPoly(
+	api frontend.API,
+	circuit *Circuit,
+	initialOODQueries []frontend.Variable,
+	statementPoints [][]frontend.Variable,
+	initialCombinationRandomness []frontend.Variable,
+	oodPointLists [][]frontend.Variable,
+	stirChallengesPoints [][]frontend.Variable,
+	perRoundCombinationRandomness [][]frontend.Variable,
+	totalFoldingRandomness []frontend.Variable,
+) frontend.Variable {
+	foldingRandomnessReversed := utilities.Reverse(totalFoldingRandomness)
+	numberVars := circuit.MVParamsNumberOfVariables
 
 	value := frontend.Variable(0)
 	for j := range initialOODQueries {
-		value = api.Add(value, api.Mul(initialCombinationRandomness[j], utilities.EqPolyOutside(api, utilities.ExpandFromUnivariate(api, initialOODQueries[j], numVariables), foldingRandomness)))
+		value = api.Add(value, api.Mul(initialCombinationRandomness[j], utilities.EqPolyOutside(api, utilities.ExpandFromUnivariate(api, initialOODQueries[j], numberVars), foldingRandomnessReversed)))
 	}
 	for j := range circuit.LinearStatementValuesAtPoints {
 		value = api.Add(value, api.Mul(initialCombinationRandomness[len(initialOODQueries)+j], circuit.LinearStatementValuesAtPoints[j]))
 	}
 
-	numberVars := numVariables
-
 	for r := range oodPointLists {
-		newTmpArr := make([]frontend.Variable, len(oodPointLists[r])+len(stirChallengesPoints[r]))
 		numberVars -= circuit.FoldingFactor
-		for i := range oodPointLists[r] {
-			newTmpArr[i] = oodPointLists[r][i]
-		}
-		for i := range stirChallengesPoints[r] {
-			newTmpArr[i+len(oodPointLists[r])] = stirChallengesPoints[r][i]
-		}
-		revTmpArr := make([]frontend.Variable, len(oodPointLists[r])+len(stirChallengesPoints[r]))
+		newTmpArr := append(oodPointLists[r], stirChallengesPoints[r]...)
 
-		for i := range len(oodPointLists[r]) + len(stirChallengesPoints[r]) {
-			revTmpArr[i] = newTmpArr[len(oodPointLists[r])+len(stirChallengesPoints[r])-1-i]
-		}
 		sumOfClaims := frontend.Variable(0)
 		for i := range newTmpArr {
 			point := utilities.ExpandFromUnivariate(api, newTmpArr[i], numberVars)
-			sumOfClaims = api.Add(sumOfClaims, api.Mul(utilities.EqPolyOutside(api, point, foldingRandomness[0:numberVars]), perRoundCombinationRandomness[r][i]))
+			sumOfClaims = api.Add(sumOfClaims, api.Mul(utilities.EqPolyOutside(api, point, foldingRandomnessReversed[0:numberVars]), perRoundCombinationRandomness[r][i]))
 		}
 		value = api.Add(value, sumOfClaims)
 	}
