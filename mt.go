@@ -236,7 +236,7 @@ func initialSumcheck(
 	firstOODAnswers []frontend.Variable,
 	initialCombinationRandomness []frontend.Variable,
 	sumcheckRounds [][][]frontend.Variable,
-) {
+) frontend.Variable {
 
 	checkTheVeryFirstSumcheck(api, circuit, firstOODAnswers, initialCombinationRandomness, sumcheckRounds)
 	for roundIndex := 1; roundIndex < circuit.FoldingFactorArray[0]; roundIndex++ {
@@ -248,6 +248,11 @@ func initialSumcheck(
 
 		checkSumOverBool(api, evaluatedPolyAtRandomness, sumcheckRounds[roundIndex][0])
 	}
+	return evaluateFunction(
+		api,
+		sumcheckRounds[circuit.FoldingFactorArray[0]-1][0],
+		sumcheckRounds[circuit.FoldingFactorArray[0]-1][1][0],
+	)
 }
 
 func checkMainRounds(
@@ -267,10 +272,10 @@ func checkMainRounds(
 	perRoundCombinationRandomness [][]frontend.Variable,
 	finalSumcheckRandomness []frontend.Variable,
 	finalSumcheckRounds [][][]frontend.Variable,
+	lastEval frontend.Variable,
 ) {
 	computedFolds := ComputeFolds(api, circuit, sumcheckRounds, finalFoldingRandomness)
 
-	var lastEval frontend.Variable
 	prevPoly := sumcheckRounds[len(sumcheckRounds)-1][0][:]
 	prevRandomness := sumcheckRounds[len(sumcheckRounds)-1][1][0]
 
@@ -284,6 +289,7 @@ func checkMainRounds(
 			product := api.Mul(val, combinationRandomness[roundIndex][i])
 			valuesTimesCombRand = api.Add(valuesTimesCombRand, product)
 		}
+
 		claimedSum := api.Add(evaluateFunction(api, prevPoly, prevRandomness), valuesTimesCombRand)
 
 		checkSumOverBool(api, claimedSum, sumcheckPolynomials[roundIndex][0])
@@ -349,7 +355,12 @@ func checkMainRounds(
 }
 
 func ComputeVPoly(api frontend.API, circuit *Circuit, finalFoldingRandomness [][]frontend.Variable, sumcheckRounds [][][]frontend.Variable, initialOODQueries []frontend.Variable, statementPoints [][]frontend.Variable, initialCombinationRandomness []frontend.Variable, oodPointLists [][]frontend.Variable, stirChallengesPoints [][]frontend.Variable, perRoundCombinationRandomness [][]frontend.Variable, finalSumcheckRandomness []frontend.Variable) frontend.Variable {
-	foldingRandomness := make([]frontend.Variable, len(finalFoldingRandomness[0])*len(finalFoldingRandomness)+len(sumcheckRounds)+len(finalSumcheckRandomness))
+	finalFoldingRandomnessLen := 0
+	if len(finalFoldingRandomness) > 0 {
+		finalFoldingRandomnessLen = len(finalFoldingRandomness) * len(finalFoldingRandomness[0])
+	}
+
+	foldingRandomness := make([]frontend.Variable, finalFoldingRandomnessLen+len(sumcheckRounds)+len(finalSumcheckRandomness))
 	for j := range len(finalSumcheckRandomness) {
 		foldingRandomness[j] = finalSumcheckRandomness[len(finalSumcheckRandomness)-1-j]
 	}
@@ -437,13 +448,22 @@ func ComputeFoldsHelped(api frontend.API, circuit *Circuit, sumcheckRounds [][][
 	}
 
 	evaluations := make([]frontend.Variable, len(circuit.Leaves[len(circuit.Leaves)-1]))
+	randomness_point := make([]frontend.Variable, len(sumcheckRounds))
+	for i := range len(sumcheckRounds) {
+		randomness_point[len(sumcheckRounds)-1-i] = sumcheckRounds[len(sumcheckRounds)-1-i][1][0]
+	}
 	for j := range circuit.Leaves[len(circuit.Leaves)-1] {
 		answListLen := len(circuit.Leaves[len(circuit.Leaves)-1][j])
 		answerList := make([]frontend.Variable, answListLen)
 		for z := range answListLen {
 			answerList[z] = circuit.Leaves[len(circuit.Leaves)-1][j][z]
 		}
-		evaluations[j] = utilities.MultivarPoly(answerList, finalFoldingRandomness[len(finalFoldingRandomness)-1], api)
+
+		if len(finalFoldingRandomness) > 0 {
+			evaluations[j] = utilities.MultivarPoly(answerList, finalFoldingRandomness[len(finalFoldingRandomness)-1], api)
+		} else {
+			evaluations[j] = utilities.MultivarPoly(answerList, randomness_point, api)
+		}
 	}
 	result[len(result)-1] = evaluations
 	return result
@@ -490,7 +510,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 	}
 
-	finalFoldingRandomness := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
+	finalFoldingLen := len(circuit.RoundParametersOODSamples)
+	finalFoldingRandomness := make([][]frontend.Variable, finalFoldingLen)
+
 	sumcheckPolynomials := make([][][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodPointsList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	oodAnswersList := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
@@ -525,6 +547,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	initialCombinationRandomness = ExpandRandomness(api, combinationRandomnessGenerator[0], circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
 
 	sumcheckRounds := make([][][]frontend.Variable, circuit.FoldingFactorArray[0])
+
 	for i := range circuit.FoldingFactorArray[0] {
 		sumcheckRounds[i] = make([][]frontend.Variable, 2)
 		sumcheckPolynomialEvals := make([]frontend.Variable, 3)
@@ -541,7 +564,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		sumcheckRounds[i][0] = sumcheckPolynomialEvals
 		sumcheckRounds[i][1] = foldingRandomnessSingle
 	}
-	initialSumcheck(api, circuit, initialOODAnswers, initialCombinationRandomness, sumcheckRounds)
+
+	lastEval := initialSumcheck(api, circuit, initialOODAnswers, initialCombinationRandomness, sumcheckRounds)
 	// // } else {
 	// // 	initialCombinationRandomness = []frontend.Variable{1}
 	// // }
@@ -549,6 +573,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	roots := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	stirChallengesPoints := make([][]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	prevRoot := rootHash[0]
+
 	for r := range circuit.RoundParametersOODSamples {
 		roots[r] = make([]frontend.Variable, 1)
 		if err = arthur.FillNextScalars(roots[r]); err != nil {
@@ -638,7 +663,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.FinalQueries, domainSize, len(circuit.FoldingFactorArray)-1)
 	if err != nil {
-		api.Println(err)
+		// api.Println(err)
 		return nil
 	}
 
@@ -689,7 +714,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 	}
 
-	checkMainRounds(api, circuit, sumcheckRounds, sumcheckPolynomials, finalFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckRounds)
+	checkMainRounds(api, circuit, sumcheckRounds, sumcheckPolynomials, finalFoldingRandomness, oodPointsList, oodAnswersList, perRoundCombinationRandomness, finalCoefficients, finalRandomnessPoints, initialOODQueries, initialCombinationRandomness, stirChallengesPoints, perRoundCombinationRandomness, finalSumcheckRandomness, finalSumcheckRounds, lastEval)
 	return nil
 }
 
@@ -836,13 +861,23 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
 	mvParamsNumberOfVariables := cfg.NVars
 	foldingFactor := cfg.FoldingFactor
-	finalSumcheckRounds := mvParamsNumberOfVariables % foldingFactor[0]
+	var finalSumcheckRounds int
+
+	if len(cfg.FoldingFactor) > 1 {
+		foldingFactor = append(cfg.FoldingFactor, cfg.FoldingFactor[len(cfg.FoldingFactor)-1])
+		finalSumcheckRounds = mvParamsNumberOfVariables % foldingFactor[len(foldingFactor)-1]
+	} else {
+		foldingFactor = []int{4}
+		finalSumcheckRounds = mvParamsNumberOfVariables % 4
+	}
 	domainSize := (2 << mvParamsNumberOfVariables) * (1 << cfg.Rate) / 2
 	oodSamples := cfg.OODSamples
 	numOfQueries := cfg.NumQueries
 	powBits := cfg.PowBits
 	finalQueries := cfg.FinalQueries
 	nRounds := cfg.NRounds
+	finalPowBits := cfg.FinalPowBits
+	finalFoldingPowBits := cfg.FinalFoldingPowBits
 	statementPoints := make([][]frontend.Variable, 1)
 	statementPoints[0] = make([]frontend.Variable, mvParamsNumberOfVariables)
 	contStatementPoints := make([][]frontend.Variable, 1)
@@ -888,8 +923,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		PowBits:                              powBits,
-		FinalPowBits:                         0,
-		FinalFoldingPowBits:                  0,
+		FinalPowBits:                         finalPowBits,
+		FinalFoldingPowBits:                  finalFoldingPowBits,
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
@@ -914,8 +949,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		StartingDomainBackingDomainGenerator: startingDomainGen,
 		FoldingFactorArray:                   foldingFactor,
 		PowBits:                              powBits,
-		FinalPowBits:                         0,
-		FinalFoldingPowBits:                  0,
+		FinalPowBits:                         finalPowBits,
+		FinalFoldingPowBits:                  finalFoldingPowBits,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		RoundParametersOODSamples:            oodSamples,
