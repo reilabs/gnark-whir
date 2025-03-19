@@ -33,7 +33,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	computedFold := computeFold(circuit.Leaves[0], initialSumcheckFoldingRandomness, api)
 
 	mainRoundData := generateEmptyMainRoundData(circuit)
-	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(uint64(1<<circuit.FoldingFactor)))
+	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(uint64(1<<circuit.FoldingFactorArray[0])))
 	domainSize := circuit.DomainSize
 
 	totalFoldingRandomness := initialSumcheckFoldingRandomness
@@ -48,7 +48,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		if err != nil {
 			return err
 		}
-		mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator)
+		mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator, r)
 		if err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		lastEval = api.Add(lastEval, calculateShiftValue(roundOODAnswers, mainRoundData.CombinationRandomness[r], computedFold, api))
 
 		roundFoldingRandomness := []frontend.Variable{}
-		roundFoldingRandomness, lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
+		roundFoldingRandomness, lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactorArray[r], 3)
 		if err != nil {
 			return nil
 		}
@@ -240,7 +240,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
-		FoldingFactor:                        foldingFactor[0],
+		FoldingFactorArray:                   foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		PowBits:                              powBits,
@@ -269,7 +269,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		StartingDomainBackingDomainGenerator: startingDomainGen,
-		FoldingFactor:                        foldingFactor[0],
+		FoldingFactorArray:                   foldingFactor,
 		PowBits:                              powBits,
 		FinalPowBits:                         cfg.FinalPowBits,
 		FinalFoldingPowBits:                  0,

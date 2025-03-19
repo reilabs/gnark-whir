@@ -25,8 +25,9 @@ func GetStirChallenges(
 	arthur gnark_nimue.Arthur,
 	numQueries int,
 	domainSize int,
+	roundIndex int,
 ) ([]frontend.Variable, error) {
-	foldedDomainSize := domainSize / (1 << circuit.FoldingFactor)
+	foldedDomainSize := domainSize / (1 << circuit.FoldingFactorArray[roundIndex])
 	domainSizeBytes := (bits.Len(uint(foldedDomainSize*2-1)) - 1 + 7) / 8
 
 	stirQueries := make([]uints.U8, domainSizeBytes*numQueries)
@@ -55,7 +56,7 @@ type Circuit struct {
 	DomainSize                           int
 	StartingDomainBackingDomainGenerator frontend.Variable
 	CommittmentOODSamples                int
-	FoldingFactor                        int
+	FoldingFactorArray                   []int
 	FinalSumcheckRounds                  int
 	ParamNRounds                         int
 	MVParamsNumberOfVariables            int
@@ -159,7 +160,7 @@ func initialSumcheck(
 	OODAnswersAndStatmentEvaluations := append(initialOODAnswers, circuit.LinearStatementEvaluations...)
 	lastEval := utilities.DotProduct(api, initialCombinationRandomness, OODAnswersAndStatmentEvaluations)
 
-	initialSumcheckFoldingRandomness, lastEval, err := runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactor, 3)
+	initialSumcheckFoldingRandomness, lastEval, err := runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactorArray[0], 3)
 	if err != nil {
 		return InitialSumcheckData{}, nil, nil, err
 	}
@@ -220,8 +221,8 @@ func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nim
 	return mainRoundSumcheckPolynomials, sumcheckRandomness, nil
 }
 
-func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQueries int, leafIndexes []uints.U64, domainSize int, circuit *Circuit, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable) ([]frontend.Variable, error) {
-	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, NQueries, domainSize)
+func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQueries int, leafIndexes []uints.U64, domainSize int, circuit *Circuit, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable, roundIndex int) ([]frontend.Variable, error) {
+	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, NQueries, domainSize, roundIndex)
 	if err != nil {
 		api.Println(err)
 		return nil, err
@@ -296,7 +297,7 @@ func ComputeWPoly(
 	}
 
 	for r := range mainRoundData.OODPoints {
-		numberVars -= circuit.FoldingFactor
+		numberVars -= circuit.FoldingFactorArray[r]
 		newTmpArr := append(mainRoundData.OODPoints[r], mainRoundData.StirChallengesPoints[r]...)
 
 		sumOfClaims := frontend.Variable(0)
@@ -381,7 +382,7 @@ func generateFinalCoefficientsAndRandomnessPoints(api frontend.API, arthur gnark
 	if err := arthur.FillNextScalars(finalCoefficients); err != nil {
 		return nil, nil, err
 	}
-	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator)
+	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator, len(circuit.FoldingFactorArray)-1)
 	if err != nil {
 		return nil, nil, err
 	}
