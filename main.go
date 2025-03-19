@@ -36,6 +36,7 @@ type ProofObject struct {
 }
 
 type Config struct {
+	LogNumConstraints    int      `json:"log_num_constraints"`
 	NRounds              int      `json:"n_rounds"`
 	NVars                int      `json:"n_vars"`
 	FoldingFactor        []int    `json:"folding_factor"`
@@ -54,14 +55,14 @@ type Config struct {
 }
 
 func main() {
-	f, err := os.Open("../../ProveKit/prover/proof")
+	f, err := os.Open("../ProveKit/prover/proof")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer f.Close()
 
-	params, err := os.ReadFile("../../ProveKit/prover/params")
+	params, err := os.ReadFile("../ProveKit/prover/params")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -76,6 +77,10 @@ func main() {
 
 	var x ProofObject
 	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	fmt.Println(x.StatementValuesAtRandomPoint)
 	io := gnark_nimue.IOPattern{}
