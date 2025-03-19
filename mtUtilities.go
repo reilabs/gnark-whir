@@ -77,6 +77,7 @@ type Circuit struct {
 	LinearStatementValuesAtPoints        []frontend.Variable
 	LinearStatementEvaluations           []frontend.Variable
 	NVars                                int
+	LogNumConstraints                    int
 	// Public Input
 	IO         []byte
 	Transcript []uints.U8 `gnark:",public"`
@@ -338,17 +339,17 @@ func ComputeFolds(api frontend.API, circuit *Circuit, initialSumcheckFoldingRand
 }
 
 func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit) ([]frontend.Variable, []frontend.Variable, frontend.Variable, error) {
-	t_rand := make([]frontend.Variable, circuit.NVars)
+	t_rand := make([]frontend.Variable, circuit.LogNumConstraints)
 	err := arthur.FillChallengeScalars(t_rand)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	sp_rand := make([]frontend.Variable, circuit.NVars)
+	sp_rand := make([]frontend.Variable, circuit.LogNumConstraints)
 	savedValForSumcheck := frontend.Variable(0)
 
 	sp_rand_temp := make([]frontend.Variable, 1)
-	for i := 0; i < circuit.NVars; i++ {
+	for i := 0; i < circuit.LogNumConstraints; i++ {
 		sp := make([]frontend.Variable, 4)
 		if err = arthur.FillNextScalars(sp); err != nil {
 			return nil, nil, nil, err

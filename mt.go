@@ -192,7 +192,15 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
 	mvParamsNumberOfVariables := cfg.NVars
 	foldingFactor := cfg.FoldingFactor
-	finalSumcheckRounds := mvParamsNumberOfVariables % foldingFactor[0]
+	var finalSumcheckRounds int
+
+	if len(cfg.FoldingFactor) > 1 {
+		foldingFactor = append(cfg.FoldingFactor, cfg.FoldingFactor[len(cfg.FoldingFactor)-1])
+		finalSumcheckRounds = mvParamsNumberOfVariables % foldingFactor[len(foldingFactor)-1]
+	} else {
+		foldingFactor = []int{4}
+		finalSumcheckRounds = mvParamsNumberOfVariables % 4
+	}
 	domainSize := (2 << mvParamsNumberOfVariables) * (1 << cfg.Rate) / 2
 	oodSamples := cfg.OODSamples
 	numOfQueries := cfg.NumQueries
@@ -245,7 +253,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		PowBits:                              powBits,
 		FinalPowBits:                         cfg.FinalPowBits,
-		FinalFoldingPowBits:                  0,
+		FinalFoldingPowBits:                  cfg.FinalFoldingPowBits,
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
@@ -256,6 +264,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		LeafSiblingHashes:                    containerTotalLeafSiblingHashes,
 		AuthPaths:                            containerTotalAuthPath,
 		NVars:                                cfg.NVars,
+		LogNumConstraints:                    cfg.LogNumConstraints,
 	}
 
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
@@ -272,7 +281,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		FoldingFactorArray:                   foldingFactor,
 		PowBits:                              powBits,
 		FinalPowBits:                         cfg.FinalPowBits,
-		FinalFoldingPowBits:                  0,
+		FinalFoldingPowBits:                  cfg.FinalFoldingPowBits,
 		FinalSumcheckRounds:                  finalSumcheckRounds,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
 		RoundParametersOODSamples:            oodSamples,
@@ -288,6 +297,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		LeafSiblingHashes:                    totalLeafSiblingHashes,
 		AuthPaths:                            totalAuthPath,
 		NVars:                                cfg.NVars,
+		LogNumConstraints:                    cfg.LogNumConstraints,
 	}
 
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())

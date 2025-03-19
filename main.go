@@ -36,6 +36,7 @@ type ProofObject struct {
 }
 
 type Config struct {
+	LogNumConstraints    int      `json:"log_num_constraints"`
 	NRounds              int      `json:"n_rounds"`
 	NVars                int      `json:"n_vars"`
 	FoldingFactor        []int    `json:"folding_factor"`
