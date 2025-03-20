@@ -106,6 +106,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		circuit,
 		initialSumcheckData,
 		mainRoundData,
+		sp_rand,
 		totalFoldingRandomness,
 	)
 
@@ -119,7 +120,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	return nil
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config) {
+func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 	proofs := proof_arg.MerklePaths
 	var totalAuthPath = make([][][][]uints.U8, len(proofs))
 	var totalLeaves = make([][][]frontend.Variable, len(proofs))
@@ -237,6 +238,31 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		contLinearStatementEvaluations[i] = frontend.Variable(x)
 	}
 
+	matrixA := make([]MatrixCell, len(matrixData.A))
+	for i := range len(matrixData.A) {
+		matrixA[i] = MatrixCell{
+			row:    matrixData.A[i].Constraint,
+			column: matrixData.A[i].Signal,
+			value:  mustBigInt(matrixData.A[i].Value),
+		}
+	}
+	matrixB := make([]MatrixCell, len(matrixData.B))
+	for i := range len(matrixData.B) {
+		matrixB[i] = MatrixCell{
+			row:    matrixData.B[i].Constraint,
+			column: matrixData.B[i].Signal,
+			value:  mustBigInt(matrixData.B[i].Value),
+		}
+	}
+	matrixC := make([]MatrixCell, len(matrixData.C))
+	for i := range len(matrixData.C) {
+		matrixC[i] = MatrixCell{
+			row:    matrixData.C[i].Constraint,
+			column: matrixData.C[i].Signal,
+			value:  mustBigInt(matrixData.C[i].Value),
+		}
+	}
+
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           contTranscript,
@@ -265,6 +291,9 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		AuthPaths:                            containerTotalAuthPath,
 		NVars:                                cfg.NVars,
 		LogNumConstraints:                    cfg.LogNumConstraints,
+		MatrixA:                              matrixA,
+		MatrixB:                              matrixB,
+		MatrixC:                              matrixC,
 	}
 
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
@@ -298,6 +327,9 @@ func verify_circuit(proof_arg ProofObject, cfg Config) {
 		AuthPaths:                            totalAuthPath,
 		NVars:                                cfg.NVars,
 		LogNumConstraints:                    cfg.LogNumConstraints,
+		MatrixA:                              matrixA,
+		MatrixB:                              matrixB,
+		MatrixC:                              matrixC,
 	}
 
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
