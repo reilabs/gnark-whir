@@ -106,6 +106,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		circuit,
 		initialSumcheckData,
 		mainRoundData,
+		sp_rand,
 		totalFoldingRandomness,
 	)
 
