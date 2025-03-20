@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/big"
 	"math/bits"
 	"reilabs/whir-verifier-circuit/typeConverters"
 	"reilabs/whir-verifier-circuit/utilities"
@@ -78,6 +79,9 @@ type Circuit struct {
 	LinearStatementEvaluations           []frontend.Variable
 	NVars                                int
 	LogNumConstraints                    int
+	MatrixA                              []MatrixCell
+	MatrixB                              []MatrixCell
+	MatrixC                              []MatrixCell
 	// Public Input
 	IO         []byte
 	Transcript []uints.U8 `gnark:",public"`
@@ -295,7 +299,7 @@ func ComputeWPoly(
 		value = api.Add(value, api.Mul(initialSumcheckData.InitialCombinationRandomness[j], utilities.EqPolyOutside(api, utilities.ExpandFromUnivariate(api, initialSumcheckData.InitialOODQueries[j], numberVars), foldingRandomnessReversed)))
 	}
 
-	matrixExtensionEvals := evaluateR1CSMatrixExtension(api, sp_rand, foldingRandomnessReversed)
+	matrixExtensionEvals := evaluateR1CSMatrixExtension(api, circuit, sp_rand, foldingRandomnessReversed)
 
 	for j := range circuit.LinearStatementValuesAtPoints {
 		value = api.Add(value, api.Mul(initialSumcheckData.InitialCombinationRandomness[len(initialSumcheckData.InitialOODQueries)+j], matrixExtensionEvals[j]))
@@ -422,7 +426,15 @@ func calculateShiftValue(oodAnswers []frontend.Variable, combinationRandomness [
 	return utilities.DotProduct(api, append(oodAnswers, computedFold...), combinationRandomness)
 }
 
-func evaluateR1CSMatrixExtension(api frontend.API, rowRand []frontend.Variable, colRand []frontend.Variable) []frontend.Variable {
+func mustBigInt(s string) *big.Int {
+	n, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		panic("invalid big.Int string: " + s)
+	}
+	return n
+}
+
+func evaluateR1CSMatrixExtension(api frontend.API, circuit *Circuit, rowRand []frontend.Variable, colRand []frontend.Variable) []frontend.Variable {
 	ansA := frontend.Variable(0)
 	ansB := frontend.Variable(0)
 	ansC := frontend.Variable(0)
@@ -430,46 +442,14 @@ func evaluateR1CSMatrixExtension(api frontend.API, rowRand []frontend.Variable, 
 	rowEval := calculateEQOverBooleanHypercube(api, rowRand)
 	colEval := calculateEQOverBooleanHypercube(api, colRand)
 
-	matrixA := []MatrixCell{
-		{row: 0, column: 1, value: 1},
-		{row: 1, column: 8, value: 1},
-		{row: 2, column: 2, value: 1},
-		{row: 3, column: 0, value: 1},
-		{row: 4, column: 3, value: 1},
-		{row: 5, column: 0, value: 1},
-		{row: 6, column: 0, value: 1},
+	for i := range len(circuit.MatrixA) {
+		ansA = api.Add(ansA, api.Mul(circuit.MatrixA[i].value, api.Mul(rowEval[circuit.MatrixA[i].row], colEval[circuit.MatrixA[i].column])))
 	}
-
-	matrixB := []MatrixCell{
-		{row: 0, column: 6, value: 1},
-		{row: 1, column: 7, value: 1},
-		{row: 2, column: 6, value: 1},
-		{row: 3, column: 9, value: 1},
-		{row: 3, column: 10, value: 1},
-		{row: 4, column: 7, value: 1},
-		{row: 5, column: 11, value: 1},
-		{row: 5, column: 12, value: 1},
-		{row: 6, column: 4, value: 1},
-		{row: 6, column: 13, value: 1},
+	for i := range circuit.MatrixB {
+		ansB = api.Add(ansB, api.Mul(circuit.MatrixB[i].value, api.Mul(rowEval[circuit.MatrixB[i].row], colEval[circuit.MatrixB[i].column])))
 	}
-
-	matrixC := []MatrixCell{
-		{row: 0, column: 8, value: 1},
-		{row: 1, column: 9, value: 1},
-		{row: 2, column: 10, value: 1},
-		{row: 3, column: 11, value: 1},
-		{row: 4, column: 12, value: 1},
-		{row: 5, column: 13, value: 1},
-		{row: 6, column: 5, value: 1},
-	}
-	for i := range matrixA {
-		ansA = api.Add(ansA, api.Mul(matrixA[i].value, api.Mul(rowEval[matrixA[i].row], colEval[matrixA[i].column])))
-	}
-	for i := range matrixB {
-		ansB = api.Add(ansB, api.Mul(matrixB[i].value, api.Mul(rowEval[matrixB[i].row], colEval[matrixB[i].column])))
-	}
-	for i := range matrixC {
-		ansC = api.Add(ansC, api.Mul(matrixC[i].value, api.Mul(rowEval[matrixC[i].row], colEval[matrixC[i].column])))
+	for i := range circuit.MatrixC {
+		ansC = api.Add(ansC, api.Mul(circuit.MatrixC[i].value, api.Mul(rowEval[circuit.MatrixC[i].row], colEval[circuit.MatrixC[i].column])))
 	}
 
 	return []frontend.Variable{ansA, ansB, ansC}
@@ -497,5 +477,5 @@ func calculateEQOverBooleanHypercube(api frontend.API, r []frontend.Variable) []
 type MatrixCell struct {
 	row    int
 	column int
-	value  int
+	value  *big.Int
 }

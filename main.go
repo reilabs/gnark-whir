@@ -54,6 +54,18 @@ type Config struct {
 	StatementEvaluations []string `json:"statement_evaluations"`
 }
 
+type Item struct {
+	Constraint int    `json:"constraint"`
+	Signal     int    `json:"signal"`
+	Value      string `json:"value"`
+}
+
+type MatrixData struct {
+	A []Item `json:"a"`
+	B []Item `json:"b"`
+	C []Item `json:"c"`
+}
+
 func main() {
 	f, err := os.Open("../ProveKit/prover/proof")
 	if err != nil {
@@ -63,6 +75,12 @@ func main() {
 	defer f.Close()
 
 	params, err := os.ReadFile("../ProveKit/prover/params")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	r1cs, err := os.ReadFile("../ProveKit/prover/disclose_wrencher.json")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -87,5 +105,11 @@ func main() {
 	_ = io.Parse([]byte(cfg.IOPattern))
 	fmt.Printf("io: %s\n", io.PPrint())
 
-	verify_circuit(x, cfg)
+	var matrixData MatrixData
+	err = json.Unmarshal(r1cs, &matrixData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
+		os.Exit(1)
+	}
+	verify_circuit(x, cfg, matrixData)
 }
