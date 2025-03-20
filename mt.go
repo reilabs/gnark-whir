@@ -11,6 +11,7 @@ import (
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/consensys/gnark/profile"
 	"github.com/consensys/gnark/std/math/uints"
 )
 
@@ -295,8 +296,9 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		MatrixB:                              matrixB,
 		MatrixC:                              matrixC,
 	}
-
+	p := profile.Start()
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	p.Stop()
 	pk, vk, _ := groth16.Setup(ccs)
 
 	assignment := Circuit{
