@@ -28,84 +28,52 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	api.Println(sp_rand)
 	api.Println(savedValForSumcheck)
 
-	batchSize, rootHash0, rootHash1, batchingRandomness, err := ParseBatchedCommitment(api, arthur, circuit)
+	batchSize, rootHashes, batchingRandomness, err := ParseBatchedCommitment(api, arthur, circuit, uapi)
 	if err != nil {
 		return err
 	}
 
-	api.Println(batchSize)
-	api.Println(rootHash0)
-	api.Println(rootHash1)
-	api.Println(batchingRandomness)
-
 	batchSizeLen := typeConverters.LittleEndianFromUints(api, batchSize)
-	api.Println(batchSizeLen)
 
 	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
 	if err != nil {
 		return err
 	}
 
-	api.Println(initialSumcheckData.InitialOODQueries)
-	api.Println(initialSumcheckData.InitialCombinationRandomness...)
-	api.Println(lastEval)
-	api.Println(initialSumcheckFoldingRandomness...)
-
-	// api.Println(circuit.FirstRoundPaths.Leaves[0])
-	// api.Println(circuit.MerklePaths.Leaves[0])
 	computedFolded := combineFirstRoundLeaves(api, circuit.FirstRoundPaths.Leaves, batchingRandomness)
-	// api.Println(computedFolded)
 	roundAnswers := make([][][]frontend.Variable, len(circuit.MerklePaths.Leaves)+1)
 	roundAnswers[0] = computedFolded
 	for i := range len(circuit.MerklePaths.Leaves) {
 		roundAnswers[i+1] = circuit.MerklePaths.Leaves[i]
 	}
-	api.Println(roundAnswers)
-	// api.Println(batchingRandomness)
+
 	computedFold := computeFold(computedFolded, initialSumcheckFoldingRandomness, api)
-	api.Println(computedFold)
 
 	mainRoundData := generateEmptyMainRoundData(circuit)
 	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(uint64(1<<circuit.FoldingFactorArray[0])))
 	domainSize := circuit.DomainSize
 
-	api.Println(domainSize)
-	api.Println(expDomainGenerator)
-	api.Println(mainRoundData)
-
 	totalFoldingRandomness := initialSumcheckFoldingRandomness
-	api.Println(totalFoldingRandomness...)
 
 	rootHashList := make([]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	for r := range circuit.RoundParametersOODSamples {
-		// 	// for r := range 1 {
 
-		// 	// round_data (the one with fma_stir_queries), it should be used with FirstRoundPaths
-		// 	// if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
-		// 	// 	return err
-		// 	// }
 		rootHash := make([]frontend.Variable, 1)
 		if err := arthur.FillNextScalars(rootHash); err != nil {
 			return err
 		}
 		rootHashList[r] = rootHash[0]
-		api.Println(rootHash...)
 
 		roundOODAnswers := []frontend.Variable{}
 		mainRoundData.OODPoints[r], roundOODAnswers, err = FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
 		if err != nil {
 			return err
 		}
-		api.Println(roundOODAnswers)
-		api.Println(mainRoundData.OODPoints[r])
 
 		stirChallengeIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize, r)
 		if err != nil {
 			return err
 		}
-		api.Println(stirChallengeIndexes)
-		api.Println(circuit.MerklePaths.LeafIndexes[r])
-		api.Println(circuit.FirstRoundPaths.LeafIndexes)
 
 		// mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.MerklePaths.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator, r)
 		// if err != nil {
@@ -114,7 +82,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		// }
 
 		if r == 0 {
-			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, []frontend.Variable{rootHash0, rootHash1}, batchingRandomness, stirChallengeIndexes)
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, rootHashes, batchingRandomness, stirChallengeIndexes)
 			if err != nil {
 				return err
 			}
@@ -122,7 +90,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			for index := range circuit.FirstRoundPaths.LeafIndexes[r] {
 				mainRoundData.StirChallengesPoints[r][index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.FirstRoundPaths.LeafIndexes[r][index])
 			}
-			api.Println(mainRoundData.StirChallengesPoints[r])
 		} else {
 			err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.MerklePaths.LeafIndexes[r-1], roundAnswers[r], circuit.MerklePaths.LeafSiblingHashes[r-1], circuit.MerklePaths.AuthPaths[r-1], rootHashList[r-1])
 			if err != nil {
@@ -136,7 +103,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			for index := range circuit.MerklePaths.LeafIndexes[r-1] {
 				mainRoundData.StirChallengesPoints[r][index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.MerklePaths.LeafIndexes[r-1][index])
 			}
-			api.Println(mainRoundData.StirChallengesPoints[r])
 		}
 
 		if err = RunPoW(api, sc, arthur, circuit.PowBits[r]); err != nil {
@@ -150,7 +116,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 		lastEval = api.Add(lastEval, calculateShiftValue(roundOODAnswers, mainRoundData.CombinationRandomness[r], computedFold, api))
 
-		api.Println(lastEval)
 		roundFoldingRandomness := []frontend.Variable{}
 		roundFoldingRandomness, lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactorArray[r], 3)
 		if err != nil {
@@ -158,7 +123,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 
 		computedFold = computeFold(circuit.MerklePaths.Leaves[r], roundFoldingRandomness, api)
-		api.Println(computedFold)
 		totalFoldingRandomness = append(totalFoldingRandomness, roundFoldingRandomness...)
 
 		domainSize /= 2
@@ -199,9 +163,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		totalFoldingRandomness,
 	)
 
-	api.Println(evaluationOfWPoly)
-	api.Println(lastEval)
-	api.Println(utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api))
 	api.AssertIsEqual(
 		lastEval,
 		api.Mul(evaluationOfWPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
@@ -458,6 +419,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
+		BatchSize:                            len(firstRoundPaths),
 		LinearStatementEvaluations:           contLinearStatementEvaluations,
 		LinearStatementValuesAtPoints:        contLinearStatementValuesAtPoints,
 		MerklePaths:                          merklePaths,
@@ -491,6 +453,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
+		BatchSize:                            len(firstRoundPaths),
 		StartingDomainBackingDomainGenerator: startingDomainGen,
 		FoldingFactorArray:                   foldingFactor,
 		PowBits:                              powBits,

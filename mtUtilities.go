@@ -77,6 +77,7 @@ type Circuit struct {
 	FinalPowBits                         int
 	FinalFoldingPowBits                  int
 	FinalQueries                         int
+	BatchSize                            int
 	MerklePaths                          MerklePaths
 	FirstRoundPaths                      MerklePaths
 	// Leaves                               [][][]frontend.Variable
@@ -340,7 +341,6 @@ func ComputeWPoly(
 ) frontend.Variable {
 	foldingRandomnessReversed := utilities.Reverse(totalFoldingRandomness)
 
-	api.Println(foldingRandomnessReversed...)
 	numberVars := circuit.MVParamsNumberOfVariables
 
 	value := frontend.Variable(0)
@@ -350,30 +350,20 @@ func ComputeWPoly(
 
 	matrixExtensionEvals := evaluateR1CSMatrixExtension(api, circuit, sp_rand, foldingRandomnessReversed)
 
-	api.Println(circuit.LinearStatementEvaluations...)
-	api.Println(circuit.LinearStatementValuesAtPoints...)
-	api.Println(matrixExtensionEvals...)
-
 	for j := range circuit.LinearStatementValuesAtPoints {
 		value = api.Add(value, api.Mul(initialSumcheckData.InitialCombinationRandomness[len(initialSumcheckData.InitialOODQueries)+j], matrixExtensionEvals[j]))
 	}
-
-	api.Println(value)
 
 	for r := range mainRoundData.OODPoints {
 		numberVars -= circuit.FoldingFactorArray[r]
 		newTmpArr := append(mainRoundData.OODPoints[r], mainRoundData.StirChallengesPoints[r]...)
 
-		api.Println(mainRoundData.OODPoints[r]...)
-		api.Println(mainRoundData.StirChallengesPoints[r]...)
 		sumOfClaims := frontend.Variable(0)
 		for i := range newTmpArr {
 			point := utilities.ExpandFromUnivariate(api, newTmpArr[i], numberVars)
-			api.Println(point)
 			sumOfClaims = api.Add(sumOfClaims, api.Mul(utilities.EqPolyOutside(api, point, foldingRandomnessReversed[0:numberVars]), mainRoundData.CombinationRandomness[r][i]))
 		}
 		value = api.Add(value, sumOfClaims)
-		api.Println(value)
 	}
 
 	return value
@@ -436,14 +426,10 @@ func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Ci
 func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.Arthur, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, batchSizeLen frontend.Variable, rootHashes []frontend.Variable, batchingRandomness frontend.Variable, stirChallengeIndexes []frontend.Variable) error {
 
 	for i := range circuit.FirstRoundPaths.Leaves {
-		api.Println(i)
-		api.Println(circuit.FirstRoundPaths.Leaves[len(circuit.FirstRoundPaths.Leaves)-1])
-		api.Println(circuit.FirstRoundPaths.LeafIndexes[i])
 		err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.FirstRoundPaths.LeafIndexes[i], circuit.FirstRoundPaths.Leaves[len(circuit.FirstRoundPaths.Leaves)-1], circuit.FirstRoundPaths.LeafSiblingHashes[i], circuit.FirstRoundPaths.AuthPaths[i], rootHashes[i])
 		if err != nil {
 			return err
 		}
-		api.Println(stirChallengeIndexes)
 		err = utilities.IsSubset(api, uapi, arthur, stirChallengeIndexes, circuit.FirstRoundPaths.LeafIndexes[i])
 		if err != nil {
 			return err
@@ -453,27 +439,29 @@ func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.A
 	return nil
 }
 
-func ParseBatchedCommitment(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit) ([]uints.U8, frontend.Variable, frontend.Variable, frontend.Variable, error) {
-	batchSize := make([]uints.U8, 4)
-	if err := arthur.FillNextBytes(batchSize); err != nil {
-		return nil, 0, 0, 0, err
+func ParseBatchedCommitment(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit, uapi *uints.BinaryField[uints.U64]) ([]uints.U8, []frontend.Variable, frontend.Variable, error) {
+	batchSizeArray := make([]uints.U8, 4)
+	if err := arthur.FillNextBytes(batchSizeArray); err != nil {
+		return nil, []frontend.Variable{}, 0, err
 	}
 
-	rootHash0 := make([]frontend.Variable, 1)
-	if err := arthur.FillNextScalars(rootHash0); err != nil {
-		return nil, 0, 0, 0, err
-	}
+	batchSize := typeConverters.LittleEndianFromUints(api, batchSizeArray)
+	api.AssertIsEqual(circuit.BatchSize, batchSize)
 
-	rootHash1 := make([]frontend.Variable, 1)
-	if err := arthur.FillNextScalars(rootHash1); err != nil {
-		return nil, 0, 0, 0, err
+	rootHashes := make([]frontend.Variable, circuit.BatchSize)
+	for i := range circuit.BatchSize {
+		rootHash := make([]frontend.Variable, 1)
+		if err := arthur.FillNextScalars(rootHash); err != nil {
+			return nil, []frontend.Variable{}, 0, err
+		}
+		rootHashes[i] = rootHash[0]
 	}
 
 	batchingRandomness := make([]frontend.Variable, 1)
 	if err := arthur.FillChallengeScalars(batchingRandomness); err != nil {
-		return nil, 0, 0, 0, err
+		return nil, []frontend.Variable{}, 0, err
 	}
-	return batchSize, rootHash0[0], rootHash1[0], batchingRandomness[0], nil
+	return batchSizeArray, rootHashes, batchingRandomness[0], nil
 }
 
 func FillInAndVerifyRootHash(roundNum int, api frontend.API, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, circuit *Circuit, arthur gnark_nimue.Arthur) error {
