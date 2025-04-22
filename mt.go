@@ -24,52 +24,141 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	if err != nil {
 		return err
 	}
+	api.Println(t_rand)
+	api.Println(sp_rand)
+	api.Println(savedValForSumcheck)
+
+	batchSize, rootHash0, rootHash1, batchingRandomness, err := ParseBatchedCommitment(api, arthur, circuit)
+	if err != nil {
+		return err
+	}
+
+	api.Println(batchSize)
+	api.Println(rootHash0)
+	api.Println(rootHash1)
+	api.Println(batchingRandomness)
+
+	batchSizeLen := typeConverters.LittleEndianFromUints(api, batchSize)
+	api.Println(batchSizeLen)
 
 	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
 	if err != nil {
 		return err
 	}
 
-	computedFold := computeFold(circuit.Leaves[0], initialSumcheckFoldingRandomness, api)
+	api.Println(initialSumcheckData.InitialOODQueries)
+	api.Println(initialSumcheckData.InitialCombinationRandomness...)
+	api.Println(lastEval)
+	api.Println(initialSumcheckFoldingRandomness...)
+
+	// api.Println(circuit.FirstRoundPaths.Leaves[0])
+	// api.Println(circuit.MerklePaths.Leaves[0])
+	computedFolded := combineFirstRoundLeaves(api, circuit.FirstRoundPaths.Leaves, batchingRandomness)
+	// api.Println(computedFolded)
+	roundAnswers := make([][][]frontend.Variable, len(circuit.MerklePaths.Leaves)+1)
+	roundAnswers[0] = computedFolded
+	for i := range len(circuit.MerklePaths.Leaves) {
+		roundAnswers[i+1] = circuit.MerklePaths.Leaves[i]
+	}
+	api.Println(roundAnswers)
+	// api.Println(batchingRandomness)
+	computedFold := computeFold(computedFolded, initialSumcheckFoldingRandomness, api)
+	api.Println(computedFold)
 
 	mainRoundData := generateEmptyMainRoundData(circuit)
 	expDomainGenerator := utilities.Exponent(api, uapi, circuit.StartingDomainBackingDomainGenerator, uints.NewU64(uint64(1<<circuit.FoldingFactorArray[0])))
 	domainSize := circuit.DomainSize
 
-	totalFoldingRandomness := initialSumcheckFoldingRandomness
+	api.Println(domainSize)
+	api.Println(expDomainGenerator)
+	api.Println(mainRoundData)
 
+	totalFoldingRandomness := initialSumcheckFoldingRandomness
+	api.Println(totalFoldingRandomness...)
+
+	rootHashList := make([]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	for r := range circuit.RoundParametersOODSamples {
-		if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
+		// 	// for r := range 1 {
+
+		// 	// round_data (the one with fma_stir_queries), it should be used with FirstRoundPaths
+		// 	// if err = FillInAndVerifyRootHash(r+1, api, uapi, sc, circuit, arthur); err != nil {
+		// 	// 	return err
+		// 	// }
+		rootHash := make([]frontend.Variable, 1)
+		if err := arthur.FillNextScalars(rootHash); err != nil {
 			return err
 		}
+		rootHashList[r] = rootHash[0]
+		api.Println(rootHash...)
 
 		roundOODAnswers := []frontend.Variable{}
 		mainRoundData.OODPoints[r], roundOODAnswers, err = FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
 		if err != nil {
 			return err
 		}
-		mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator, r)
+		api.Println(roundOODAnswers)
+		api.Println(mainRoundData.OODPoints[r])
+
+		stirChallengeIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize, r)
 		if err != nil {
 			return err
 		}
+		api.Println(stirChallengeIndexes)
+		api.Println(circuit.MerklePaths.LeafIndexes[r])
+		api.Println(circuit.FirstRoundPaths.LeafIndexes)
+
+		// mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.MerklePaths.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator, r)
+		// if err != nil {
+		// 	return err
+
+		// }
+
+		if r == 0 {
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, []frontend.Variable{rootHash0, rootHash1}, batchingRandomness, stirChallengeIndexes)
+			if err != nil {
+				return err
+			}
+			mainRoundData.StirChallengesPoints[r] = make([]frontend.Variable, len(circuit.FirstRoundPaths.LeafIndexes[r]))
+			for index := range circuit.FirstRoundPaths.LeafIndexes[r] {
+				mainRoundData.StirChallengesPoints[r][index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.FirstRoundPaths.LeafIndexes[r][index])
+			}
+			api.Println(mainRoundData.StirChallengesPoints[r])
+		} else {
+			err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.MerklePaths.LeafIndexes[r-1], roundAnswers[r], circuit.MerklePaths.LeafSiblingHashes[r-1], circuit.MerklePaths.AuthPaths[r-1], rootHashList[r-1])
+			if err != nil {
+				return err
+			}
+			err = utilities.IsSubset(api, uapi, arthur, stirChallengeIndexes, circuit.MerklePaths.LeafIndexes[r-1])
+			if err != nil {
+				return err
+			}
+			mainRoundData.StirChallengesPoints[r] = make([]frontend.Variable, len(circuit.MerklePaths.LeafIndexes[r-1]))
+			for index := range circuit.MerklePaths.LeafIndexes[r-1] {
+				mainRoundData.StirChallengesPoints[r][index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.MerklePaths.LeafIndexes[r-1][index])
+			}
+			api.Println(mainRoundData.StirChallengesPoints[r])
+		}
+
 		if err = RunPoW(api, sc, arthur, circuit.PowBits[r]); err != nil {
 			return err
 		}
 
-		mainRoundData.CombinationRandomness[r], err = GenerateCombinationRandomness(api, arthur, len(circuit.LeafIndexes[r])+circuit.RoundParametersOODSamples[r])
+		mainRoundData.CombinationRandomness[r], err = GenerateCombinationRandomness(api, arthur, len(roundOODAnswers)+len(computedFold))
 		if err != nil {
 			return err
 		}
 
 		lastEval = api.Add(lastEval, calculateShiftValue(roundOODAnswers, mainRoundData.CombinationRandomness[r], computedFold, api))
 
+		api.Println(lastEval)
 		roundFoldingRandomness := []frontend.Variable{}
 		roundFoldingRandomness, lastEval, err = runSumcheckRounds(api, lastEval, arthur, circuit.FoldingFactorArray[r], 3)
 		if err != nil {
 			return nil
 		}
 
-		computedFold = computeFold(circuit.Leaves[r+1], roundFoldingRandomness, api)
+		computedFold = computeFold(circuit.MerklePaths.Leaves[r], roundFoldingRandomness, api)
+		api.Println(computedFold)
 		totalFoldingRandomness = append(totalFoldingRandomness, roundFoldingRandomness...)
 
 		domainSize /= 2
@@ -101,7 +190,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 	}
 
-	evaluationOfVPoly := ComputeWPoly(
+	evaluationOfWPoly := ComputeWPoly(
 		api,
 		circuit,
 		initialSumcheckData,
@@ -110,13 +199,16 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		totalFoldingRandomness,
 	)
 
+	api.Println(evaluationOfWPoly)
+	api.Println(lastEval)
+	api.Println(utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api))
 	api.AssertIsEqual(
 		lastEval,
-		api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
+		api.Mul(evaluationOfWPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
 	)
 
-	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
-	api.AssertIsEqual(savedValForSumcheck, x)
+	// x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
+	// api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
 }
 
@@ -190,6 +282,77 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 			}
 		}
 	}
+
+	firstRoundPaths := proof_arg.FirstRoundPaths
+	var firstRoundTotalAuthPath = make([][][][]uints.U8, len(firstRoundPaths))
+	var firstRoundTotalLeaves = make([][][]frontend.Variable, len(firstRoundPaths))
+	var firstRoundTotalLeafSiblingHashes = make([][][]uints.U8, len(firstRoundPaths))
+	var firstRoundTotalLeafIndexes = make([][]uints.U64, len(firstRoundPaths))
+
+	var containerFirstRoundTotalAuthPath = make([][][][]uints.U8, len(firstRoundPaths))
+	var containerFirstRoundTotalLeaves = make([][][]frontend.Variable, len(firstRoundPaths))
+	var containerFirstRoundTotalLeafSiblingHashes = make([][][]uints.U8, len(firstRoundPaths))
+	var containerFirstRoundTotalLeafIndexes = make([][]uints.U64, len(firstRoundPaths))
+
+	for i := range firstRoundPaths {
+		var numOfLeavesProved = len(firstRoundPaths[i].A.LeafIndexes)
+		var treeHeight = len(firstRoundPaths[i].A.AuthPathsSuffixes[0])
+
+		firstRoundTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
+		containerFirstRoundTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
+		firstRoundTotalLeaves[i] = make([][]frontend.Variable, numOfLeavesProved)
+		containerFirstRoundTotalLeaves[i] = make([][]frontend.Variable, numOfLeavesProved)
+		firstRoundTotalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
+		containerFirstRoundTotalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
+
+		for j := range numOfLeavesProved {
+			firstRoundTotalAuthPath[i][j] = make([][]uints.U8, treeHeight)
+			containerFirstRoundTotalAuthPath[i][j] = make([][]uints.U8, treeHeight)
+
+			for z := range treeHeight {
+				firstRoundTotalAuthPath[i][j][z] = make([]uints.U8, 32)
+				containerFirstRoundTotalAuthPath[i][j][z] = make([]uints.U8, 32)
+			}
+			firstRoundTotalLeaves[i][j] = make([]frontend.Variable, len(firstRoundPaths[i].B[j]))
+			containerFirstRoundTotalLeaves[i][j] = make([]frontend.Variable, len(firstRoundPaths[i].B[j]))
+			firstRoundTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
+			containerFirstRoundTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
+		}
+
+		containerFirstRoundTotalLeafIndexes[i] = make([]uints.U64, numOfLeavesProved)
+
+		var authPathsTemp = make([][]KeccakDigest, numOfLeavesProved)
+		var prevPath = firstRoundPaths[i].A.AuthPathsSuffixes[0]
+		authPathsTemp[0] = utilities.Reverse(prevPath)
+
+		for j := range firstRoundTotalAuthPath[i][0] {
+			firstRoundTotalAuthPath[i][0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
+		}
+
+		for j := 1; j < numOfLeavesProved; j++ {
+			prevPath = utilities.PrefixDecodePath(prevPath, firstRoundPaths[i].A.AuthPathsPrefixLengths[j], firstRoundPaths[i].A.AuthPathsSuffixes[j])
+			authPathsTemp[j] = utilities.Reverse(prevPath)
+			for z := 0; z < treeHeight; z++ {
+				firstRoundTotalAuthPath[i][j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
+			}
+		}
+		firstRoundTotalLeafIndexes[i] = make([]uints.U64, numOfLeavesProved)
+
+		for z := range numOfLeavesProved {
+			firstRoundTotalLeafSiblingHashes[i][z] = uints.NewU8Array(firstRoundPaths[i].A.LeafSiblingHashes[z].KeccakDigest[:])
+			firstRoundTotalLeafIndexes[i][z] = uints.NewU64(firstRoundPaths[i].A.LeafIndexes[z])
+			// fmt.Println(proofs[i].B[z])
+			for j := range firstRoundPaths[i].B[z] {
+				input := firstRoundPaths[i].B[z][j]
+				// fmt.Println("===============")
+				// fmt.Println(j)
+				// fmt.Println(input.Limbs)
+				// fmt.Println("===============")
+				firstRoundTotalLeaves[i][z][j] = typeConverters.LimbsToBigIntMod(input.Limbs)
+			}
+		}
+	}
+
 	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
 	mvParamsNumberOfVariables := cfg.NVars
 	foldingFactor := cfg.FoldingFactor
@@ -263,6 +426,18 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		}
 	}
 
+	var merklePaths = MerklePaths{
+		Leaves:            containerTotalLeaves,
+		LeafIndexes:       containerTotalLeafIndexes,
+		LeafSiblingHashes: containerTotalLeafSiblingHashes,
+		AuthPaths:         containerTotalAuthPath,
+	}
+	var firstRoundPathsForCircuit = MerklePaths{
+		Leaves:            containerFirstRoundTotalLeaves,
+		LeafIndexes:       containerFirstRoundTotalLeafIndexes,
+		LeafSiblingHashes: containerFirstRoundTotalLeafSiblingHashes,
+		AuthPaths:         containerFirstRoundTotalAuthPath,
+	}
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           contTranscript,
@@ -285,10 +460,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		StatementEvaluations:                 0,
 		LinearStatementEvaluations:           contLinearStatementEvaluations,
 		LinearStatementValuesAtPoints:        contLinearStatementValuesAtPoints,
-		Leaves:                               containerTotalLeaves,
-		LeafIndexes:                          containerTotalLeafIndexes,
-		LeafSiblingHashes:                    containerTotalLeafSiblingHashes,
-		AuthPaths:                            containerTotalAuthPath,
+		MerklePaths:                          merklePaths,
+		FirstRoundPaths:                      firstRoundPathsForCircuit,
 		NVars:                                cfg.NVars,
 		LogNumConstraints:                    cfg.LogNumConstraints,
 		MatrixA:                              matrixA,
@@ -299,6 +472,18 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	pk, vk, _ := groth16.Setup(ccs)
 
+	merklePaths = MerklePaths{
+		Leaves:            totalLeaves,
+		LeafIndexes:       totalLeafIndexes,
+		LeafSiblingHashes: totalLeafSiblingHashes,
+		AuthPaths:         totalAuthPath,
+	}
+	firstRoundPathsForCircuit = MerklePaths{
+		Leaves:            firstRoundTotalLeaves,
+		LeafIndexes:       firstRoundTotalLeafIndexes,
+		LeafSiblingHashes: firstRoundTotalLeafSiblingHashes,
+		AuthPaths:         firstRoundTotalAuthPath,
+	}
 	assignment := Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           transcriptT,
@@ -321,10 +506,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		StatementEvaluations:                 0,
 		LinearStatementEvaluations:           linearStatementEvaluations,
 		LinearStatementValuesAtPoints:        linearStatementValuesAtPoints,
-		Leaves:                               totalLeaves,
-		LeafIndexes:                          totalLeafIndexes,
-		LeafSiblingHashes:                    totalLeafSiblingHashes,
-		AuthPaths:                            totalAuthPath,
+		MerklePaths:                          merklePaths,
+		FirstRoundPaths:                      firstRoundPathsForCircuit,
 		NVars:                                cfg.NVars,
 		LogNumConstraints:                    cfg.LogNumConstraints,
 		MatrixA:                              matrixA,

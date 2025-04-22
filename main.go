@@ -31,8 +31,9 @@ type ProofElement struct {
 }
 
 type ProofObject struct {
-	MerklePaths                  []ProofElement
-	StatementValuesAtRandomPoint []Fp256
+	FirstRoundPaths              []ProofElement `json:"first_round_paths"`
+	MerklePaths                  []ProofElement `json:"merkle_paths"`
+	StatementValuesAtRandomPoint []Fp256        `json:"statement_values_at_random_point"`
 }
 
 type Config struct {
@@ -67,20 +68,20 @@ type MatrixData struct {
 }
 
 func main() {
-	f, err := os.Open("../ProveKit/prover/proof")
+	f, err := os.Open("../../ProveKit/prover/proof")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer f.Close()
 
-	params, err := os.ReadFile("../ProveKit/prover/params")
+	params, err := os.ReadFile("../../ProveKit/prover/params")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	r1cs, err := os.ReadFile("../ProveKit/prover/disclose_wrencher.json")
+	r1cs, err := os.ReadFile("../../ProveKit/prover/disclose_wrencher.json")
 	if err != nil {
 		fmt.Println(err)
 		return
