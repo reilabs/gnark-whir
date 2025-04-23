@@ -173,21 +173,31 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	return nil
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
-	proofs := proof_arg.MerklePaths
-	var totalAuthPath = make([][][][]uints.U8, len(proofs))
-	var totalLeaves = make([][][]frontend.Variable, len(proofs))
-	var totalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
-	var totalLeafIndexes = make([][]uints.U64, len(proofs))
+type MerkleObject struct {
+	AuthPaths                  [][][][]uints.U8
+	Leaves                     [][][]frontend.Variable
+	LeafSiblingHashes          [][][]uints.U8
+	LeafIndexes                [][]uints.U64
+	ContainerAuthPaths         [][][][]uints.U8
+	ContainerLeaves            [][][]frontend.Variable
+	ContainerLeafSiblingHashes [][][]uints.U8
+	ContainerLeafIndexes       [][]uints.U64
+}
 
-	var containerTotalAuthPath = make([][][][]uints.U8, len(proofs))
-	var containerTotalLeaves = make([][][]frontend.Variable, len(proofs))
-	var containerTotalLeafSiblingHashes = make([][][]uints.U8, len(proofs))
-	var containerTotalLeafIndexes = make([][]uints.U64, len(proofs))
+func ParsePathsObject(proofElements []ProofElement) MerkleObject {
+	var totalAuthPath = make([][][][]uints.U8, len(proofElements))
+	var totalLeaves = make([][][]frontend.Variable, len(proofElements))
+	var totalLeafSiblingHashes = make([][][]uints.U8, len(proofElements))
+	var totalLeafIndexes = make([][]uints.U64, len(proofElements))
 
-	for i := range proofs {
-		var numOfLeavesProved = len(proofs[i].A.LeafIndexes)
-		var treeHeight = len(proofs[i].A.AuthPathsSuffixes[0])
+	var containerTotalAuthPath = make([][][][]uints.U8, len(proofElements))
+	var containerTotalLeaves = make([][][]frontend.Variable, len(proofElements))
+	var containerTotalLeafSiblingHashes = make([][][]uints.U8, len(proofElements))
+	var containerTotalLeafIndexes = make([][]uints.U64, len(proofElements))
+
+	for i := range proofElements {
+		var numOfLeavesProved = len(proofElements[i].A.LeafIndexes)
+		var treeHeight = len(proofElements[i].A.AuthPathsSuffixes[0])
 
 		totalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
 		containerTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
@@ -204,8 +214,8 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 				totalAuthPath[i][j][z] = make([]uints.U8, 32)
 				containerTotalAuthPath[i][j][z] = make([]uints.U8, 32)
 			}
-			totalLeaves[i][j] = make([]frontend.Variable, len(proofs[i].B[j]))
-			containerTotalLeaves[i][j] = make([]frontend.Variable, len(proofs[i].B[j]))
+			totalLeaves[i][j] = make([]frontend.Variable, len(proofElements[i].B[j]))
+			containerTotalLeaves[i][j] = make([]frontend.Variable, len(proofElements[i].B[j]))
 			totalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
 			containerTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
 		}
@@ -213,7 +223,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		containerTotalLeafIndexes[i] = make([]uints.U64, numOfLeavesProved)
 
 		var authPathsTemp = make([][]KeccakDigest, numOfLeavesProved)
-		var prevPath = proofs[i].A.AuthPathsSuffixes[0]
+		var prevPath = proofElements[i].A.AuthPathsSuffixes[0]
 		authPathsTemp[0] = utilities.Reverse(prevPath)
 
 		for j := range totalAuthPath[i][0] {
@@ -221,7 +231,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		}
 
 		for j := 1; j < numOfLeavesProved; j++ {
-			prevPath = utilities.PrefixDecodePath(prevPath, proofs[i].A.AuthPathsPrefixLengths[j], proofs[i].A.AuthPathsSuffixes[j])
+			prevPath = utilities.PrefixDecodePath(prevPath, proofElements[i].A.AuthPathsPrefixLengths[j], proofElements[i].A.AuthPathsSuffixes[j])
 			authPathsTemp[j] = utilities.Reverse(prevPath)
 			for z := 0; z < treeHeight; z++ {
 				totalAuthPath[i][j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
@@ -230,89 +240,30 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		totalLeafIndexes[i] = make([]uints.U64, numOfLeavesProved)
 
 		for z := range numOfLeavesProved {
-			totalLeafSiblingHashes[i][z] = uints.NewU8Array(proofs[i].A.LeafSiblingHashes[z].KeccakDigest[:])
-			totalLeafIndexes[i][z] = uints.NewU64(proofs[i].A.LeafIndexes[z])
-			// fmt.Println(proofs[i].B[z])
-			for j := range proofs[i].B[z] {
-				input := proofs[i].B[z][j]
-				// fmt.Println("===============")
-				// fmt.Println(j)
-				// fmt.Println(input.Limbs)
-				// fmt.Println("===============")
+			totalLeafSiblingHashes[i][z] = uints.NewU8Array(proofElements[i].A.LeafSiblingHashes[z].KeccakDigest[:])
+			totalLeafIndexes[i][z] = uints.NewU64(proofElements[i].A.LeafIndexes[z])
+			for j := range proofElements[i].B[z] {
+				input := proofElements[i].B[z][j]
 				totalLeaves[i][z][j] = typeConverters.LimbsToBigIntMod(input.Limbs)
 			}
 		}
 	}
 
-	firstRoundPaths := proof_arg.FirstRoundPaths
-	var firstRoundTotalAuthPath = make([][][][]uints.U8, len(firstRoundPaths))
-	var firstRoundTotalLeaves = make([][][]frontend.Variable, len(firstRoundPaths))
-	var firstRoundTotalLeafSiblingHashes = make([][][]uints.U8, len(firstRoundPaths))
-	var firstRoundTotalLeafIndexes = make([][]uints.U64, len(firstRoundPaths))
-
-	var containerFirstRoundTotalAuthPath = make([][][][]uints.U8, len(firstRoundPaths))
-	var containerFirstRoundTotalLeaves = make([][][]frontend.Variable, len(firstRoundPaths))
-	var containerFirstRoundTotalLeafSiblingHashes = make([][][]uints.U8, len(firstRoundPaths))
-	var containerFirstRoundTotalLeafIndexes = make([][]uints.U64, len(firstRoundPaths))
-
-	for i := range firstRoundPaths {
-		var numOfLeavesProved = len(firstRoundPaths[i].A.LeafIndexes)
-		var treeHeight = len(firstRoundPaths[i].A.AuthPathsSuffixes[0])
-
-		firstRoundTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
-		containerFirstRoundTotalAuthPath[i] = make([][][]uints.U8, numOfLeavesProved)
-		firstRoundTotalLeaves[i] = make([][]frontend.Variable, numOfLeavesProved)
-		containerFirstRoundTotalLeaves[i] = make([][]frontend.Variable, numOfLeavesProved)
-		firstRoundTotalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
-		containerFirstRoundTotalLeafSiblingHashes[i] = make([][]uints.U8, numOfLeavesProved)
-
-		for j := range numOfLeavesProved {
-			firstRoundTotalAuthPath[i][j] = make([][]uints.U8, treeHeight)
-			containerFirstRoundTotalAuthPath[i][j] = make([][]uints.U8, treeHeight)
-
-			for z := range treeHeight {
-				firstRoundTotalAuthPath[i][j][z] = make([]uints.U8, 32)
-				containerFirstRoundTotalAuthPath[i][j][z] = make([]uints.U8, 32)
-			}
-			firstRoundTotalLeaves[i][j] = make([]frontend.Variable, len(firstRoundPaths[i].B[j]))
-			containerFirstRoundTotalLeaves[i][j] = make([]frontend.Variable, len(firstRoundPaths[i].B[j]))
-			firstRoundTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
-			containerFirstRoundTotalLeafSiblingHashes[i][j] = make([]uints.U8, 32)
-		}
-
-		containerFirstRoundTotalLeafIndexes[i] = make([]uints.U64, numOfLeavesProved)
-
-		var authPathsTemp = make([][]KeccakDigest, numOfLeavesProved)
-		var prevPath = firstRoundPaths[i].A.AuthPathsSuffixes[0]
-		authPathsTemp[0] = utilities.Reverse(prevPath)
-
-		for j := range firstRoundTotalAuthPath[i][0] {
-			firstRoundTotalAuthPath[i][0][j] = uints.NewU8Array(authPathsTemp[0][j].KeccakDigest[:])
-		}
-
-		for j := 1; j < numOfLeavesProved; j++ {
-			prevPath = utilities.PrefixDecodePath(prevPath, firstRoundPaths[i].A.AuthPathsPrefixLengths[j], firstRoundPaths[i].A.AuthPathsSuffixes[j])
-			authPathsTemp[j] = utilities.Reverse(prevPath)
-			for z := 0; z < treeHeight; z++ {
-				firstRoundTotalAuthPath[i][j][z] = uints.NewU8Array(authPathsTemp[j][z].KeccakDigest[:])
-			}
-		}
-		firstRoundTotalLeafIndexes[i] = make([]uints.U64, numOfLeavesProved)
-
-		for z := range numOfLeavesProved {
-			firstRoundTotalLeafSiblingHashes[i][z] = uints.NewU8Array(firstRoundPaths[i].A.LeafSiblingHashes[z].KeccakDigest[:])
-			firstRoundTotalLeafIndexes[i][z] = uints.NewU64(firstRoundPaths[i].A.LeafIndexes[z])
-			// fmt.Println(proofs[i].B[z])
-			for j := range firstRoundPaths[i].B[z] {
-				input := firstRoundPaths[i].B[z][j]
-				// fmt.Println("===============")
-				// fmt.Println(j)
-				// fmt.Println(input.Limbs)
-				// fmt.Println("===============")
-				firstRoundTotalLeaves[i][z][j] = typeConverters.LimbsToBigIntMod(input.Limbs)
-			}
-		}
+	return MerkleObject{
+		AuthPaths:                  totalAuthPath,
+		Leaves:                     totalLeaves,
+		LeafSiblingHashes:          totalLeafSiblingHashes,
+		LeafIndexes:                totalLeafIndexes,
+		ContainerAuthPaths:         containerTotalAuthPath,
+		ContainerLeaves:            containerTotalLeaves,
+		ContainerLeafSiblingHashes: containerTotalLeafSiblingHashes,
+		ContainerLeafIndexes:       containerTotalLeafIndexes,
 	}
+}
+
+func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
+	merkleObject := ParsePathsObject(proof_arg.MerklePaths)
+	firstRoundMerkleObject := ParsePathsObject(proof_arg.FirstRoundPaths)
 
 	startingDomainGen, _ := new(big.Int).SetString(cfg.DomainGenerator, 10)
 	mvParamsNumberOfVariables := cfg.NVars
@@ -388,16 +339,16 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 	}
 
 	var merklePaths = MerklePaths{
-		Leaves:            containerTotalLeaves,
-		LeafIndexes:       containerTotalLeafIndexes,
-		LeafSiblingHashes: containerTotalLeafSiblingHashes,
-		AuthPaths:         containerTotalAuthPath,
+		Leaves:            merkleObject.ContainerLeaves,
+		LeafIndexes:       merkleObject.ContainerLeafIndexes,
+		LeafSiblingHashes: merkleObject.ContainerLeafSiblingHashes,
+		AuthPaths:         merkleObject.ContainerAuthPaths,
 	}
 	var firstRoundPathsForCircuit = MerklePaths{
-		Leaves:            containerFirstRoundTotalLeaves,
-		LeafIndexes:       containerFirstRoundTotalLeafIndexes,
-		LeafSiblingHashes: containerFirstRoundTotalLeafSiblingHashes,
-		AuthPaths:         containerFirstRoundTotalAuthPath,
+		Leaves:            firstRoundMerkleObject.ContainerLeaves,
+		LeafIndexes:       firstRoundMerkleObject.ContainerLeafIndexes,
+		LeafSiblingHashes: firstRoundMerkleObject.ContainerLeafSiblingHashes,
+		AuthPaths:         firstRoundMerkleObject.ContainerAuthPaths,
 	}
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
@@ -419,7 +370,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		FinalQueries:                         finalQueries,
 		StatementPoints:                      contStatementPoints,
 		StatementEvaluations:                 0,
-		BatchSize:                            len(firstRoundPaths),
+		BatchSize:                            len(proof_arg.FirstRoundPaths),
 		LinearStatementEvaluations:           contLinearStatementEvaluations,
 		LinearStatementValuesAtPoints:        contLinearStatementValuesAtPoints,
 		MerklePaths:                          merklePaths,
@@ -435,16 +386,16 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 	pk, vk, _ := groth16.Setup(ccs)
 
 	merklePaths = MerklePaths{
-		Leaves:            totalLeaves,
-		LeafIndexes:       totalLeafIndexes,
-		LeafSiblingHashes: totalLeafSiblingHashes,
-		AuthPaths:         totalAuthPath,
+		Leaves:            merkleObject.Leaves,
+		LeafIndexes:       merkleObject.LeafIndexes,
+		LeafSiblingHashes: merkleObject.LeafSiblingHashes,
+		AuthPaths:         merkleObject.AuthPaths,
 	}
 	firstRoundPathsForCircuit = MerklePaths{
-		Leaves:            firstRoundTotalLeaves,
-		LeafIndexes:       firstRoundTotalLeafIndexes,
-		LeafSiblingHashes: firstRoundTotalLeafSiblingHashes,
-		AuthPaths:         firstRoundTotalAuthPath,
+		Leaves:            firstRoundMerkleObject.Leaves,
+		LeafIndexes:       firstRoundMerkleObject.LeafIndexes,
+		LeafSiblingHashes: firstRoundMerkleObject.LeafSiblingHashes,
+		AuthPaths:         firstRoundMerkleObject.AuthPaths,
 	}
 	assignment := Circuit{
 		IO:                                   []byte(cfg.IOPattern),
@@ -453,7 +404,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		InitialStatement:                     true,
 		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
-		BatchSize:                            len(firstRoundPaths),
+		BatchSize:                            len(proof_arg.FirstRoundPaths),
 		StartingDomainBackingDomainGenerator: startingDomainGen,
 		FoldingFactorArray:                   foldingFactor,
 		PowBits:                              powBits,
