@@ -28,14 +28,14 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	api.Println(sp_rand)
 	api.Println(savedValForSumcheck)
 
-	batchSize, rootHashes, batchingRandomness, err := ParseBatchedCommitment(api, arthur, circuit, uapi)
+	batchSize, rootHashes, batchingRandomness, err := parseBatchedCommitment(api, arthur, circuit, uapi)
 	if err != nil {
 		return err
 	}
 
 	batchSizeLen := typeConverters.LittleEndianFromUints(api, batchSize)
 
-	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, uapi, sc)
+	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur)
 	if err != nil {
 		return err
 	}
@@ -75,17 +75,12 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			return err
 		}
 
-		// mainRoundData.StirChallengesPoints[r], err = GenerateStirChallengePoints(api, arthur, circuit.RoundParametersNumOfQueries[r], circuit.MerklePaths.LeafIndexes[r], domainSize, circuit, uapi, expDomainGenerator, r)
-		// if err != nil {
-		// 	return err
-
-		// }
-
 		if r == 0 {
 			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, rootHashes, batchingRandomness, stirChallengeIndexes)
 			if err != nil {
 				return err
 			}
+
 			mainRoundData.StirChallengesPoints[r] = make([]frontend.Variable, len(circuit.FirstRoundPaths.LeafIndexes[r]))
 			for index := range circuit.FirstRoundPaths.LeafIndexes[r] {
 				mainRoundData.StirChallengesPoints[r][index] = utilities.Exponent(api, uapi, expDomainGenerator, circuit.FirstRoundPaths.LeafIndexes[r][index])
