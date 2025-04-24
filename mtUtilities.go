@@ -36,7 +36,6 @@ func GetStirChallenges(
 		return nil, err
 	}
 
-	api.Println(stirQueries)
 	bitLength := bits.Len(uint(foldedDomainSize)) - 1
 
 	indexes := make([]frontend.Variable, numQueries)
@@ -80,19 +79,15 @@ type Circuit struct {
 	BatchSize                            int
 	MerklePaths                          MerklePaths
 	FirstRoundPaths                      MerklePaths
-	// Leaves                               [][][]frontend.Variable
-	// LeafIndexes                          [][]uints.U64
-	// LeafSiblingHashes                    [][][]uints.U8
-	// AuthPaths                            [][][][]uints.U8
-	StatementPoints               [][]frontend.Variable
-	StatementEvaluations          int
-	LinearStatementValuesAtPoints []frontend.Variable
-	LinearStatementEvaluations    []frontend.Variable
-	NVars                         int
-	LogNumConstraints             int
-	MatrixA                       []MatrixCell
-	MatrixB                       []MatrixCell
-	MatrixC                       []MatrixCell
+	StatementPoints                      [][]frontend.Variable
+	StatementEvaluations                 int
+	LinearStatementValuesAtPoints        []frontend.Variable
+	LinearStatementEvaluations           []frontend.Variable
+	NVars                                int
+	LogNumConstraints                    int
+	MatrixA                              []MatrixCell
+	MatrixB                              []MatrixCell
+	MatrixC                              []MatrixCell
 	// Public Input
 	IO         []byte
 	Transcript []uints.U8 `gnark:",public"`
