@@ -308,28 +308,48 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		contLinearStatementEvaluations[i] = frontend.Variable(x)
 	}
 
-	matrixA := make([]MatrixCell, len(matrixData.A))
-	for i := range len(matrixData.A) {
-		matrixA[i] = MatrixCell{
-			row:    matrixData.A[i].Constraint,
-			column: matrixData.A[i].Signal,
-			value:  mustBigInt(matrixData.A[i].Value),
+	matrixA := make([]MatrixCell, len(internedR1CS.A.Values))
+	for i := range len(internedR1CS.A.RowIndices) {
+		end := len(internedR1CS.A.Values) - 1
+		if i < len(internedR1CS.A.RowIndices)-1 {
+			end = int(internedR1CS.A.RowIndices[i+1] - 1)
+		}
+		for j := int(internedR1CS.A.RowIndices[i]); j <= end; j++ {
+			matrixA[j] = MatrixCell{
+				row:    i,
+				column: int(internedR1CS.A.ColIndices[j]),
+				value:  typeConverters.LimbsToBigIntMod(interner.Values[internedR1CS.A.Values[j]].Limbs),
+			}
 		}
 	}
-	matrixB := make([]MatrixCell, len(matrixData.B))
-	for i := range len(matrixData.B) {
-		matrixB[i] = MatrixCell{
-			row:    matrixData.B[i].Constraint,
-			column: matrixData.B[i].Signal,
-			value:  mustBigInt(matrixData.B[i].Value),
+
+	matrixB := make([]MatrixCell, len(internedR1CS.B.Values))
+	for i := range len(internedR1CS.B.RowIndices) {
+		end := len(internedR1CS.B.Values) - 1
+		if i < len(internedR1CS.B.RowIndices)-1 {
+			end = int(internedR1CS.B.RowIndices[i+1] - 1)
+		}
+		for j := int(internedR1CS.B.RowIndices[i]); j <= end; j++ {
+			matrixB[j] = MatrixCell{
+				row:    i,
+				column: int(internedR1CS.B.ColIndices[j]),
+				value:  typeConverters.LimbsToBigIntMod(interner.Values[internedR1CS.B.Values[j]].Limbs),
+			}
 		}
 	}
-	matrixC := make([]MatrixCell, len(matrixData.C))
-	for i := range len(matrixData.C) {
-		matrixC[i] = MatrixCell{
-			row:    matrixData.C[i].Constraint,
-			column: matrixData.C[i].Signal,
-			value:  mustBigInt(matrixData.C[i].Value),
+
+	matrixC := make([]MatrixCell, len(internedR1CS.C.Values))
+	for i := range len(internedR1CS.C.RowIndices) {
+		end := len(internedR1CS.C.Values) - 1
+		if i < len(internedR1CS.C.RowIndices)-1 {
+			end = int(internedR1CS.C.RowIndices[i+1] - 1)
+		}
+		for j := int(internedR1CS.C.RowIndices[i]); j <= end; j++ {
+			matrixC[j] = MatrixCell{
+				row:    i,
+				column: int(internedR1CS.C.ColIndices[j]),
+				value:  typeConverters.LimbsToBigIntMod(interner.Values[internedR1CS.C.Values[j]].Limbs),
+			}
 		}
 	}
 

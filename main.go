@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -61,56 +63,91 @@ type Item struct {
 	Value      string `json:"value"`
 }
 
-type MatrixData struct {
-	A []Item `json:"a"`
-	B []Item `json:"b"`
-	C []Item `json:"c"`
+type SparseMatrix struct {
+	Rows       uint64   `json:"rows"`
+	Cols       uint64   `json:"cols"`
+	RowIndices []uint64 `json:"row_indices"`
+	ColIndices []uint64 `json:"col_indices"`
+	Values     []uint64 `json:"values"`
+}
+
+type Interner struct {
+	Values []Fp256 `json:"values"`
+}
+
+type InternerAsString struct {
+	Values string `json:"values"`
+}
+
+type R1CS struct {
+	PublicInputs uint64           `json:"public_inputs"`
+	Witnesses    uint64           `json:"witnesses"`
+	Constraints  uint64           `json:"constraints"`
+	Interner     InternerAsString `json:"interner"`
+	A            SparseMatrix     `json:"a"`
+	B            SparseMatrix     `json:"b"`
+	C            SparseMatrix     `json:"c"`
 }
 
 func main() {
-	f, err := os.Open("../../ProveKit/prover/proof")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer f.Close()
 
-	params, err := os.ReadFile("../../ProveKit/prover/params")
+	proofFile, err := os.Open("../ProveKit/prover/proof")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	r1cs, err := os.ReadFile("../../ProveKit/prover/disclose_wrencher.json")
+	var proof ProofObject
+	_, err = go_ark_serialize.CanonicalDeserializeWithMode(proofFile, &proof, false, false)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	var cfg Config
-	if err := json.Unmarshal(params, &cfg); err != nil {
+
+	configFile, err := os.ReadFile("../ProveKit/prover/params")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	var config Config
+	if err := json.Unmarshal(configFile, &config); err != nil {
+		log.Fatalf("Error unmarshalling JSON: %v\n", err)
+	}
+	fmt.Printf("Parsed configuration:\n%+v\n", config)
+
+	io := gnark_nimue.IOPattern{}
+	err = io.Parse([]byte(config.IOPattern))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("io: %s\n", io.PPrint())
+
+	r1csFile, r1csErr := os.ReadFile("../ProveKit/r1cs.json")
+	if r1csErr != nil {
+		fmt.Println(err)
+		return
+	}
+
+	var r1cs R1CS
+	if err := json.Unmarshal(r1csFile, &r1cs); err != nil {
 		log.Fatalf("Error unmarshalling JSON: %v\n", err)
 	}
 
-	fmt.Printf("Parsed configuration:\n%+v\n", cfg)
-
-	var x ProofObject
-	_, err = go_ark_serialize.CanonicalDeserializeWithMode(f, &x, false, false)
+	internerBytes, err := hex.DecodeString(r1cs.Interner.Values)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	fmt.Println(x.StatementValuesAtRandomPoint)
-	io := gnark_nimue.IOPattern{}
-	_ = io.Parse([]byte(cfg.IOPattern))
-	fmt.Printf("io: %s\n", io.PPrint())
-
-	var matrixData MatrixData
-	err = json.Unmarshal(r1cs, &matrixData)
+	var interner Interner
+	_, err = go_ark_serialize.CanonicalDeserializeWithMode(bytes.NewReader(internerBytes), &interner, false, false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
-		os.Exit(1)
+		fmt.Println(err)
+		return
 	}
-	verify_circuit(x, cfg, matrixData)
+
+	verify_circuit(proof, config, r1cs, interner)
 }
