@@ -33,8 +33,9 @@ type ProofElement struct {
 }
 
 type ProofObject struct {
-	MerklePaths                  []ProofElement
-	StatementValuesAtRandomPoint []Fp256
+	FirstRoundPaths              []ProofElement `json:"first_round_paths"`
+	MerklePaths                  []ProofElement `json:"merkle_paths"`
+	StatementValuesAtRandomPoint []Fp256        `json:"statement_values_at_random_point"`
 }
 
 type Config struct {
@@ -89,6 +90,7 @@ type R1CS struct {
 }
 
 func main() {
+
 	proofFile, err := os.Open("../ProveKit/prover/proof")
 	if err != nil {
 		fmt.Println(err)
@@ -101,6 +103,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+
 
 	configFile, err := os.ReadFile("../ProveKit/prover/params")
 	if err != nil {

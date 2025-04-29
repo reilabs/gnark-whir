@@ -52,6 +52,13 @@ func GetStirChallenges(
 	return indexes, nil
 }
 
+type MerklePaths struct {
+	Leaves            [][][]frontend.Variable
+	LeafIndexes       [][]uints.U64
+	LeafSiblingHashes [][][]uints.U8
+	AuthPaths         [][][][]uints.U8
+}
+
 type Circuit struct {
 	// Inputs
 	DomainSize                           int
@@ -69,10 +76,9 @@ type Circuit struct {
 	FinalPowBits                         int
 	FinalFoldingPowBits                  int
 	FinalQueries                         int
-	Leaves                               [][][]frontend.Variable
-	LeafIndexes                          [][]uints.U64
-	LeafSiblingHashes                    [][][]uints.U8
-	AuthPaths                            [][][][]uints.U8
+	BatchSize                            int
+	MerklePaths                          MerklePaths
+	FirstRoundPaths                      MerklePaths
 	StatementPoints                      [][]frontend.Variable
 	StatementEvaluations                 int
 	LinearStatementValuesAtPoints        []frontend.Variable
@@ -145,19 +151,14 @@ func initialSumcheck(
 	api frontend.API,
 	circuit *Circuit,
 	arthur gnark_nimue.Arthur,
-	uapi *uints.BinaryField[uints.U64],
-	sc *skyscraper.Skyscraper,
 ) (InitialSumcheckData, frontend.Variable, []frontend.Variable, error) {
-	if err := FillInAndVerifyRootHash(0, api, uapi, sc, circuit, arthur); err != nil {
-		return InitialSumcheckData{}, nil, nil, err
-	}
 
-	initialOODQueries, initialOODAnswers, err := FillInOODPointsAndAnswers(circuit.CommittmentOODSamples, arthur)
+	initialCombinationRandomness, err := GenerateCombinationRandomness(api, arthur, 0+len(circuit.LinearStatementEvaluations))
 	if err != nil {
 		return InitialSumcheckData{}, nil, nil, err
 	}
 
-	initialCombinationRandomness, err := GenerateCombinationRandomness(api, arthur, circuit.CommittmentOODSamples+len(circuit.LinearStatementEvaluations))
+	initialOODQueries, initialOODAnswers, err := FillInOODPointsAndAnswers(0, arthur)
 	if err != nil {
 		return InitialSumcheckData{}, nil, nil, err
 	}
@@ -169,7 +170,6 @@ func initialSumcheck(
 	if err != nil {
 		return InitialSumcheckData{}, nil, nil, err
 	}
-
 	return InitialSumcheckData{
 		InitialOODQueries:            initialOODQueries,
 		InitialCombinationRandomness: initialCombinationRandomness,
@@ -177,6 +177,9 @@ func initialSumcheck(
 }
 
 func FillInOODPointsAndAnswers(numberOfOODPoints int, arthur gnark_nimue.Arthur) ([]frontend.Variable, []frontend.Variable, error) {
+	if numberOfOODPoints == 0 {
+		return []frontend.Variable{}, []frontend.Variable{}, nil
+	}
 	oodPoints := make([]frontend.Variable, numberOfOODPoints)
 	oodAnswers := make([]frontend.Variable, numberOfOODPoints)
 
@@ -199,31 +202,6 @@ func RunPoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arth
 		}
 	}
 	return nil
-}
-
-func FillInSumcheckPolynomialsAndRandomnessAndRunPoW(NVars int, arthur gnark_nimue.Arthur, api frontend.API, sc *skyscraper.Skyscraper, NpowBits int) ([][]frontend.Variable, []frontend.Variable, error) {
-	mainRoundSumcheckPolynomials := make([][]frontend.Variable, NVars)
-	sumcheckRandomness := make([]frontend.Variable, NVars)
-
-	for i := range NVars {
-		mainRoundSumcheckPolynomials[i] = make([]frontend.Variable, 3) // Sumcheck polynomial in the evaluations form
-		sumcheckRanomnessTemp := make([]frontend.Variable, 1)          // Sumcheck folding randomness
-
-		if err := arthur.FillNextScalars(mainRoundSumcheckPolynomials[i]); err != nil {
-			return nil, nil, err
-		}
-
-		if err := arthur.FillChallengeScalars(sumcheckRanomnessTemp); err != nil {
-			return nil, nil, err
-		}
-
-		sumcheckRandomness[i] = sumcheckRanomnessTemp[0]
-		if err := RunPoW(api, sc, arthur, NpowBits); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	return mainRoundSumcheckPolynomials, sumcheckRandomness, nil
 }
 
 func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQueries int, leafIndexes []uints.U64, domainSize int, circuit *Circuit, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable, roundIndex int) ([]frontend.Variable, error) {
@@ -292,6 +270,7 @@ func ComputeWPoly(
 	totalFoldingRandomness []frontend.Variable,
 ) frontend.Variable {
 	foldingRandomnessReversed := utilities.Reverse(totalFoldingRandomness)
+
 	numberVars := circuit.MVParamsNumberOfVariables
 
 	value := frontend.Variable(0)
@@ -322,12 +301,12 @@ func ComputeWPoly(
 
 func ComputeFoldsHelped(api frontend.API, circuit *Circuit, initialSumcheckFoldingRandomness []frontend.Variable, mainRoundFoldingRandomness [][]frontend.Variable) [][]frontend.Variable {
 	foldingRandomness := append([][]frontend.Variable{initialSumcheckFoldingRandomness}, mainRoundFoldingRandomness...)
-	result := make([][]frontend.Variable, len(circuit.Leaves))
+	result := make([][]frontend.Variable, len(circuit.MerklePaths.Leaves))
 
-	for i := range len(circuit.Leaves) {
-		result[i] = make([]frontend.Variable, len(circuit.Leaves[i]))
-		for j := range circuit.Leaves[i] {
-			result[i][j] = utilities.MultivarPoly(circuit.Leaves[i][j], foldingRandomness[i], api)
+	for i := range len(circuit.MerklePaths.Leaves) {
+		result[i] = make([]frontend.Variable, len(circuit.MerklePaths.Leaves[i]))
+		for j := range circuit.MerklePaths.Leaves[i] {
+			result[i][j] = utilities.MultivarPoly(circuit.MerklePaths.Leaves[i][j], foldingRandomness[i], api)
 		}
 	}
 
@@ -374,16 +353,45 @@ func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Ci
 	return t_rand, sp_rand, savedValForSumcheck, nil
 }
 
-func FillInAndVerifyRootHash(roundNum int, api frontend.API, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, circuit *Circuit, arthur gnark_nimue.Arthur) error {
-	rootHash := make([]frontend.Variable, 1)
-	if err := arthur.FillNextScalars(rootHash); err != nil {
-		return err
+func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.Arthur, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, batchSizeLen frontend.Variable, rootHashes []frontend.Variable, batchingRandomness frontend.Variable, stirChallengeIndexes []frontend.Variable) error {
+
+	for i := range circuit.FirstRoundPaths.Leaves {
+		err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.FirstRoundPaths.LeafIndexes[i], circuit.FirstRoundPaths.Leaves[len(circuit.FirstRoundPaths.Leaves)-1], circuit.FirstRoundPaths.LeafSiblingHashes[i], circuit.FirstRoundPaths.AuthPaths[i], rootHashes[i])
+		if err != nil {
+			return err
+		}
+		err = utilities.IsSubset(api, uapi, arthur, stirChallengeIndexes, circuit.FirstRoundPaths.LeafIndexes[i])
+		if err != nil {
+			return err
+		}
 	}
-	err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.LeafIndexes[roundNum], circuit.Leaves[roundNum], circuit.LeafSiblingHashes[roundNum], circuit.AuthPaths[roundNum], rootHash[0])
-	if err != nil {
-		return err
-	}
+
 	return nil
+}
+
+func parseBatchedCommitment(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit, uapi *uints.BinaryField[uints.U64]) ([]uints.U8, []frontend.Variable, frontend.Variable, error) {
+	batchSizeArray := make([]uints.U8, 4)
+	if err := arthur.FillNextBytes(batchSizeArray); err != nil {
+		return nil, []frontend.Variable{}, 0, err
+	}
+
+	batchSize := typeConverters.LittleEndianFromUints(api, batchSizeArray)
+	api.AssertIsEqual(circuit.BatchSize, batchSize)
+
+	rootHashes := make([]frontend.Variable, circuit.BatchSize)
+	for i := range circuit.BatchSize {
+		rootHash := make([]frontend.Variable, 1)
+		if err := arthur.FillNextScalars(rootHash); err != nil {
+			return nil, []frontend.Variable{}, 0, err
+		}
+		rootHashes[i] = rootHash[0]
+	}
+
+	batchingRandomness := make([]frontend.Variable, 1)
+	if err := arthur.FillChallengeScalars(batchingRandomness); err != nil {
+		return nil, []frontend.Variable{}, 0, err
+	}
+	return batchSizeArray, rootHashes, batchingRandomness[0], nil
 }
 
 func generateFinalCoefficientsAndRandomnessPoints(api frontend.API, arthur gnark_nimue.Arthur, circuit *Circuit, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, domainSize int, expDomainGenerator frontend.Variable) ([]frontend.Variable, []frontend.Variable, error) {
@@ -391,7 +399,7 @@ func generateFinalCoefficientsAndRandomnessPoints(api frontend.API, arthur gnark
 	if err := arthur.FillNextScalars(finalCoefficients); err != nil {
 		return nil, nil, err
 	}
-	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.LeafIndexes[len(circuit.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator, len(circuit.FoldingFactorArray)-1)
+	finalRandomnessPoints, err := GenerateStirChallengePoints(api, arthur, circuit.FinalQueries, circuit.MerklePaths.LeafIndexes[len(circuit.MerklePaths.LeafIndexes)-1], domainSize, circuit, uapi, expDomainGenerator, len(circuit.FoldingFactorArray)-1)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -420,6 +428,20 @@ func computeFold(leaves [][]frontend.Variable, foldingRandomness []frontend.Vari
 		computedFold[j] = utilities.MultivarPoly(leaves[j], foldingRandomness, api)
 	}
 	return computedFold
+}
+
+func combineFirstRoundLeaves(api frontend.API, firstRoundPath [][][]frontend.Variable, combinationRandomness frontend.Variable) [][]frontend.Variable {
+	combinedFirstRound := firstRoundPath[0]
+	multiplier := combinationRandomness
+	for i := 1; i < len(firstRoundPath); i++ {
+		for j := range firstRoundPath[i] {
+			for k := range firstRoundPath[i][j] {
+				combinedFirstRound[j][k] = api.Add(combinedFirstRound[j][k], api.Mul(multiplier, firstRoundPath[i][j][k]))
+			}
+		}
+		multiplier = api.Mul(multiplier, combinationRandomness)
+	}
+	return combinedFirstRound
 }
 
 func calculateShiftValue(oodAnswers []frontend.Variable, combinationRandomness []frontend.Variable, computedFold []frontend.Variable, api frontend.API) frontend.Variable {
