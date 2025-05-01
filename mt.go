@@ -28,17 +28,23 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	api.Println(sp_rand)
 	api.Println(savedValForSumcheck)
 
-	batchSize, rootHashes, batchingRandomness, err := parseBatchedCommitment(api, arthur, circuit, uapi)
+	rootHashes, batchingRandomness, oodQuery, oodAns, err := parseBatchedCommitment(api, arthur, circuit)
 	if err != nil {
 		return err
 	}
 
-	batchSizeLen := typeConverters.LittleEndianFromUints(api, batchSize)
+	api.Println(rootHashes)
+	api.Println(batchingRandomness)
+	api.Println(oodQuery)
+	api.Println(oodAns)
 
-	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur)
+	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, oodQuery, oodAns, batchingRandomness)
 	if err != nil {
 		return err
 	}
+
+	api.Println(lastEval)
+	api.Println(initialSumcheckFoldingRandomness)
 
 	computedFolded := combineFirstRoundLeaves(api, circuit.FirstRoundPaths.Leaves, batchingRandomness)
 	roundAnswers := make([][][]frontend.Variable, len(circuit.MerklePaths.Leaves)+1)
@@ -55,6 +61,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	totalFoldingRandomness := initialSumcheckFoldingRandomness
 
+	api.Println(computedFold)
+	api.Println(mainRoundData)
+	api.Println(expDomainGenerator)
+	api.Println(domainSize)
+	api.Println(totalFoldingRandomness)
 	rootHashList := make([]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	for r := range circuit.RoundParametersOODSamples {
 
@@ -76,7 +87,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 
 		if r == 0 {
-			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, rootHashes, batchingRandomness, stirChallengeIndexes)
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, frontend.Variable(circuit.BatchSize), rootHashes, batchingRandomness, stirChallengeIndexes)
 			if err != nil {
 				return err
 			}
@@ -158,6 +169,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		totalFoldingRandomness,
 	)
 
+	api.Println(evaluationOfWPoly)
+	api.Println(lastEval)
+	api.Println(finalCoefficients)
+	api.Println(finalSumcheckRandomness)
+	api.Println(api.Mul(evaluationOfWPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)))
 	api.AssertIsEqual(
 		lastEval,
 		api.Mul(evaluationOfWPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
@@ -256,7 +272,7 @@ func ParsePathsObject(proofElements []ProofElement) MerkleObject {
 	}
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
+func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, interner Interner) {
 	merkleObject := ParsePathsObject(proof_arg.MerklePaths)
 	firstRoundMerkleObject := ParsePathsObject(proof_arg.FirstRoundPaths)
 
@@ -365,6 +381,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		LeafSiblingHashes: firstRoundMerkleObject.ContainerLeafSiblingHashes,
 		AuthPaths:         firstRoundMerkleObject.ContainerAuthPaths,
 	}
+
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           contTranscript,
