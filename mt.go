@@ -28,14 +28,17 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	api.Println(sp_rand)
 	api.Println(savedValForSumcheck)
 
-	batchSize, rootHashes, batchingRandomness, err := parseBatchedCommitment(api, arthur, circuit, uapi)
+	rootHashes, batchingRandomness, oodQuery, oodAns, err := parseBatchedCommitment(api, arthur, circuit)
 	if err != nil {
 		return err
 	}
 
-	batchSizeLen := typeConverters.LittleEndianFromUints(api, batchSize)
+	api.Println(rootHashes)
+	api.Println(batchingRandomness)
+	api.Println(oodQuery)
+	api.Println(oodAns)
 
-	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur)
+	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, oodQuery, oodAns, batchingRandomness)
 	if err != nil {
 		return err
 	}
@@ -76,7 +79,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 
 		if r == 0 {
-			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, rootHashes, batchingRandomness, stirChallengeIndexes)
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, frontend.Variable(circuit.BatchSize), rootHashes, batchingRandomness, stirChallengeIndexes, roundAnswers[0])
 			if err != nil {
 				return err
 			}
@@ -256,7 +259,7 @@ func ParsePathsObject(proofElements []ProofElement) MerkleObject {
 	}
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
+func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, interner Interner) {
 	merkleObject := ParsePathsObject(proof_arg.MerklePaths)
 	firstRoundMerkleObject := ParsePathsObject(proof_arg.FirstRoundPaths)
 
@@ -365,6 +368,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		LeafSiblingHashes: firstRoundMerkleObject.ContainerLeafSiblingHashes,
 		AuthPaths:         firstRoundMerkleObject.ContainerAuthPaths,
 	}
+
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           contTranscript,
@@ -374,7 +378,6 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		ParamNRounds:                         nRounds,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
-		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		FoldingFactorArray:                   foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
@@ -412,12 +415,12 @@ func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
 		LeafSiblingHashes: firstRoundMerkleObject.LeafSiblingHashes,
 		AuthPaths:         firstRoundMerkleObject.AuthPaths,
 	}
+
 	assignment := Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           transcriptT,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
-		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		BatchSize:                            len(proof_arg.FirstRoundPaths),
 		StartingDomainBackingDomainGenerator: startingDomainGen,
