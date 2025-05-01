@@ -63,7 +63,6 @@ type Circuit struct {
 	// Inputs
 	DomainSize                           int
 	StartingDomainBackingDomainGenerator frontend.Variable
-	CommittmentOODSamples                int
 	FoldingFactorArray                   []int
 	FinalSumcheckRounds                  int
 	ParamNRounds                         int
@@ -382,10 +381,10 @@ func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Ci
 	return t_rand, sp_rand, savedValForSumcheck, nil
 }
 
-func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.Arthur, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, batchSizeLen frontend.Variable, rootHashes []frontend.Variable, batchingRandomness frontend.Variable, stirChallengeIndexes []frontend.Variable) error {
+func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.Arthur, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, batchSizeLen frontend.Variable, rootHashes []frontend.Variable, batchingRandomness frontend.Variable, stirChallengeIndexes []frontend.Variable, roundAnswers [][]frontend.Variable) error {
 
 	for i := range circuit.FirstRoundPaths.Leaves {
-		err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.FirstRoundPaths.LeafIndexes[i], circuit.FirstRoundPaths.Leaves[len(circuit.FirstRoundPaths.Leaves)-1], circuit.FirstRoundPaths.LeafSiblingHashes[i], circuit.FirstRoundPaths.AuthPaths[i], rootHashes[i])
+		err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.FirstRoundPaths.LeafIndexes[i], circuit.FirstRoundPaths.Leaves[i], circuit.FirstRoundPaths.LeafSiblingHashes[i], circuit.FirstRoundPaths.AuthPaths[i], rootHashes[i])
 		if err != nil {
 			return err
 		}
@@ -467,7 +466,14 @@ func computeFold(leaves [][]frontend.Variable, foldingRandomness []frontend.Vari
 }
 
 func combineFirstRoundLeaves(api frontend.API, firstRoundPath [][][]frontend.Variable, combinationRandomness frontend.Variable) [][]frontend.Variable {
-	combinedFirstRound := firstRoundPath[0]
+	combinedFirstRound := make([][]frontend.Variable, len(firstRoundPath[0]))
+	for j, row := range firstRoundPath[0] {
+		combinedFirstRound[j] = make([]frontend.Variable, len(row))
+		for k, val := range row {
+			combinedFirstRound[j][k] = val
+		}
+	}
+
 	multiplier := combinationRandomness
 	for i := 1; i < len(firstRoundPath); i++ {
 		for j := range firstRoundPath[i] {

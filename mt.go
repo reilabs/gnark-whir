@@ -43,9 +43,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return err
 	}
 
-	api.Println(lastEval)
-	api.Println(initialSumcheckFoldingRandomness)
-
 	computedFolded := combineFirstRoundLeaves(api, circuit.FirstRoundPaths.Leaves, batchingRandomness)
 	roundAnswers := make([][][]frontend.Variable, len(circuit.MerklePaths.Leaves)+1)
 	roundAnswers[0] = computedFolded
@@ -61,11 +58,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	totalFoldingRandomness := initialSumcheckFoldingRandomness
 
-	api.Println(computedFold)
-	api.Println(mainRoundData)
-	api.Println(expDomainGenerator)
-	api.Println(domainSize)
-	api.Println(totalFoldingRandomness)
 	rootHashList := make([]frontend.Variable, len(circuit.RoundParametersOODSamples))
 	for r := range circuit.RoundParametersOODSamples {
 
@@ -87,7 +79,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 
 		if r == 0 {
-			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, frontend.Variable(circuit.BatchSize), rootHashes, batchingRandomness, stirChallengeIndexes)
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, frontend.Variable(circuit.BatchSize), rootHashes, batchingRandomness, stirChallengeIndexes, roundAnswers[0])
 			if err != nil {
 				return err
 			}
@@ -169,11 +161,6 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		totalFoldingRandomness,
 	)
 
-	api.Println(evaluationOfWPoly)
-	api.Println(lastEval)
-	api.Println(finalCoefficients)
-	api.Println(finalSumcheckRandomness)
-	api.Println(api.Mul(evaluationOfWPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)))
 	api.AssertIsEqual(
 		lastEval,
 		api.Mul(evaluationOfWPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
@@ -391,7 +378,6 @@ func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, intern
 		ParamNRounds:                         nRounds,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
-		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		FoldingFactorArray:                   foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
@@ -429,12 +415,12 @@ func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, intern
 		LeafSiblingHashes: firstRoundMerkleObject.LeafSiblingHashes,
 		AuthPaths:         firstRoundMerkleObject.AuthPaths,
 	}
+
 	assignment := Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           transcriptT,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
-		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		BatchSize:                            len(proof_arg.FirstRoundPaths),
 		StartingDomainBackingDomainGenerator: startingDomainGen,
