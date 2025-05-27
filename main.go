@@ -63,9 +63,9 @@ type Item struct {
 }
 
 type SparseMatrix struct {
-	Rows       uint64   `json:"rows"`
-	Cols       uint64   `json:"cols"`
-	RowIndices []uint64 `json:"row_indices"`
+	Rows       uint64   `json:"num_rows"`
+	Cols       uint64   `json:"num_cols"`
+	RowIndices []uint64 `json:"new_row_indices"`
 	ColIndices []uint64 `json:"col_indices"`
 	Values     []uint64 `json:"values"`
 }
@@ -89,7 +89,7 @@ type R1CS struct {
 }
 
 func main() {
-	proofFile, err := os.Open("../ProveKit/prover/proof")
+	proofFile, err := os.Open("../ProveKit/noir-examples/poseidon-rounds/proof_for_recursive_verifier")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -102,7 +102,7 @@ func main() {
 		return
 	}
 
-	configFile, err := os.ReadFile("../ProveKit/prover/params")
+	configFile, err := os.ReadFile("../ProveKit/noir-examples/poseidon-rounds/params_for_recursive_verifier")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -112,7 +112,6 @@ func main() {
 	if err := json.Unmarshal(configFile, &config); err != nil {
 		log.Fatalf("Error unmarshalling JSON: %v\n", err)
 	}
-	fmt.Printf("Parsed configuration:\n%+v\n", config)
 
 	io := gnark_nimue.IOPattern{}
 	err = io.Parse([]byte(config.IOPattern))
@@ -120,9 +119,8 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("io: %s\n", io.PPrint())
 
-	r1csFile, r1csErr := os.ReadFile("../ProveKit/r1cs.json")
+	r1csFile, r1csErr := os.ReadFile("../ProveKit/noir-examples/poseidon-rounds/r1cs.json")
 	if r1csErr != nil {
 		fmt.Println(err)
 		return
