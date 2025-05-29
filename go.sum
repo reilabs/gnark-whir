@@ -1,3 +1,5 @@
+github.com/batmendbar/gnark-skyscraper v0.0.0-20250529013138-283303410749 h1:84BoYQ31sGLY4VrnnnCSeEvl+AYORF2U/Vc+cJQUYMM=
+github.com/batmendbar/gnark-skyscraper v0.0.0-20250529013138-283303410749/go.mod h1:DNZzTzHHeHeBsMWkDRJFkK1T1p5HrAicpSOS05mGHa8=
 github.com/bits-and-blooms/bitset v1.17.0 h1:1X2TS7aHz1ELcC0yU1y2stUs/0ig5oMU6STFZGrhvHI=
 github.com/bits-and-blooms/bitset v1.17.0/go.mod h1:7hO7Gc7Pp1vODcmWvKMRA9BNmbv6a/7QIWpPxHddWR8=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=

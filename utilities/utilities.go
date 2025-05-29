@@ -97,7 +97,7 @@ func PoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arthur,
 }
 
 func CheckPoW(api frontend.API, sc *skyscraper.Skyscraper, challenge frontend.Variable, nonce frontend.Variable, difficulty int) error {
-	hash := sc.Compress(challenge, nonce)
+	hash := sc.CompressV2(challenge, nonce)
 
 	d0, _ := new(big.Int).SetString("21888242871839275222246405745257275088548364400416034343698204186575808495617", 10)
 	d1, _ := new(big.Int).SetString("10944121435919637611123202872628637544274182200208017171849102093287904247808", 10)

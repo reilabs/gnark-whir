@@ -10,6 +10,8 @@ require (
 	github.com/reilabs/go-ark-serialize v0.0.0-20241120151746-4148c0ca17e3
 )
 
+replace github.com/reilabs/gnark-skyscraper => github.com/batmendbar/gnark-skyscraper v0.0.0-20250529013138-283303410749
+
 require (
 	github.com/bits-and-blooms/bitset v1.17.0 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
