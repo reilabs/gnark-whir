@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 
+	"github.com/urfave/cli/v2"
+
 	gnark_nimue "github.com/reilabs/gnark-nimue"
 	go_ark_serialize "github.com/reilabs/go-ark-serialize"
 )
@@ -89,60 +91,92 @@ type R1CS struct {
 }
 
 func main() {
-	proofFile, err := os.Open("../ProveKit/noir-examples/poseidon-rounds/proof_for_recursive_verifier")
+	app := &cli.App{
+		Name:  "Verifier",
+		Usage: "Verifies proof with given parameters",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "proof",
+				Usage:    "Path to the proof file",
+				Required: false,
+				Value:    "../ProveKit/noir-examples/poseidon-rounds/proof_for_recursive_verifier",
+			},
+			&cli.StringFlag{
+				Name:     "config",
+				Usage:    "Path to the config file",
+				Required: false,
+				Value:    "../ProveKit/noir-examples/poseidon-rounds/params_for_recursive_verifier",
+			},
+			&cli.StringFlag{
+				Name:     "r1cs",
+				Usage:    "Path to the r1cs json file",
+				Required: false,
+				Value:    "../ProveKit/noir-examples/poseidon-rounds/r1cs.json",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			proofFilePath := c.String("proof")
+			configFilePath := c.String("config")
+			r1csFilePath := c.String("r1cs")
+
+			proofFile, err := os.Open(proofFilePath)
+			if err != nil {
+				return fmt.Errorf("failed to open proof file: %w", err)
+			}
+			defer proofFile.Close()
+
+			var proof ProofObject
+			_, err = go_ark_serialize.CanonicalDeserializeWithMode(proofFile, &proof, false, false)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize proof: %w", err)
+			}
+
+			configFile, err := os.ReadFile(configFilePath)
+			if err != nil {
+				return fmt.Errorf("failed to read config file: %w", err)
+			}
+
+			var config Config
+			if err := json.Unmarshal(configFile, &config); err != nil {
+				return fmt.Errorf("failed to unmarshal config JSON: %w", err)
+			}
+
+			io := gnark_nimue.IOPattern{}
+			err = io.Parse([]byte(config.IOPattern))
+			if err != nil {
+				return fmt.Errorf("failed to parse IO pattern: %w", err)
+			}
+
+			r1csFile, r1csErr := os.ReadFile(r1csFilePath)
+			if r1csErr != nil {
+				return fmt.Errorf("failed to read r1cs file: %w", r1csErr)
+			}
+
+			var r1cs R1CS
+			if err := json.Unmarshal(r1csFile, &r1cs); err != nil {
+				return fmt.Errorf("failed to unmarshal r1cs JSON: %w", err)
+			}
+
+			internerBytes, err := hex.DecodeString(r1cs.Interner.Values)
+			if err != nil {
+				return fmt.Errorf("failed to decode interner values: %w", err)
+			}
+
+			var interner Interner
+			_, err = go_ark_serialize.CanonicalDeserializeWithMode(
+				bytes.NewReader(internerBytes), &interner, false, false,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize interner: %w", err)
+			}
+
+			verify_circuit(proof, config, r1cs, interner)
+			return nil
+		},
+	}
+
+	err := app.Run(os.Args)
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatal(err)
 	}
-
-	var proof ProofObject
-	_, err = go_ark_serialize.CanonicalDeserializeWithMode(proofFile, &proof, false, false)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	configFile, err := os.ReadFile("../ProveKit/noir-examples/poseidon-rounds/params_for_recursive_verifier")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	var config Config
-	if err := json.Unmarshal(configFile, &config); err != nil {
-		log.Fatalf("Error unmarshalling JSON: %v\n", err)
-	}
-
-	io := gnark_nimue.IOPattern{}
-	err = io.Parse([]byte(config.IOPattern))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	r1csFile, r1csErr := os.ReadFile("../ProveKit/noir-examples/poseidon-rounds/r1cs.json")
-	if r1csErr != nil {
-		fmt.Println(err)
-		return
-	}
-
-	var r1cs R1CS
-	if err := json.Unmarshal(r1csFile, &r1cs); err != nil {
-		log.Fatalf("Error unmarshalling JSON: %v\n", err)
-	}
-
-	internerBytes, err := hex.DecodeString(r1cs.Interner.Values)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	var interner Interner
-	_, err = go_ark_serialize.CanonicalDeserializeWithMode(bytes.NewReader(internerBytes), &interner, false, false)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	verify_circuit(proof, config, r1cs, interner)
 }
