@@ -1,7 +1,10 @@
 package main
 
 import (
+	"log"
 	"math/big"
+	"os"
+
 	"reilabs/whir-verifier-circuit/typeConverters"
 	"reilabs/whir-verifier-circuit/utilities"
 
@@ -115,12 +118,17 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		api.Mul(evaluationOfVPoly, utilities.MultivarPoly(finalCoefficients, finalSumcheckRandomness, api)),
 	)
 
-	x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
+	x := api.Mul(
+		api.Sub(
+			api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]),
+			circuit.LinearStatementEvaluations[2],
+		), calculateEQ(api, sp_rand, t_rand),
+	)
 	api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, interner Interner) {
+func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, interner Interner, outputCcsPath string) {
 	proofs := proof_arg.MerklePaths
 	var totalAuthPath = make([][][][]uints.U8, len(proofs))
 	var totalLeaves = make([][][]frontend.Variable, len(proofs))
@@ -316,7 +324,22 @@ func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, intern
 		MatrixC:                              matrixC,
 	}
 
-	ccs, _ := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	ccs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
+	if err != nil {
+		log.Fatalf("Failed to compile circuit: %v", err)
+	}
+	if outputCcsPath != "" {
+		ccsFile, err := os.Create(outputCcsPath)
+		if err != nil {
+			log.Printf("Cannot create ccs file %s: %v", outputCcsPath, err)
+		} else {
+			_, err = ccs.WriteTo(ccsFile)
+			if err != nil {
+				log.Printf("Cannot write ccs file %s: %v", outputCcsPath, err)
+			}
+		}
+		log.Printf("ccs written to %s", outputCcsPath)
+	}
 	pk, vk, _ := groth16.Setup(ccs)
 
 	assignment := Circuit{
