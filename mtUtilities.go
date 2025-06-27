@@ -407,7 +407,7 @@ func parseBatchedCommitment(api frontend.API, arthur gnark_nimue.Arthur, circuit
 	}
 
 	oodPoints := make([]frontend.Variable, 1)
-	oodAnswers := make([][]frontend.Variable, circuit.BatchSize))
+	oodAnswers := make([][]frontend.Variable, circuit.BatchSize)
 
 	if err := arthur.FillChallengeScalars(oodPoints); err != nil {
 		return nil, nil, nil, nil, err

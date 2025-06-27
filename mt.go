@@ -91,7 +91,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 
 		if r == 0 {
-			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, frontend.Variable(circuit.BatchSize), rootHashes, batchingRandomness, stirChallengeIndexes, roundAnswers[0])
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, rootHashes, batchingRandomness, stirChallengeIndexes, roundAnswers[0])
 			if err != nil {
 				return err
 			}
