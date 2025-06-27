@@ -108,9 +108,9 @@ func generateEmptyMainRoundData(circuit *Circuit) MainRoundData {
 }
 
 func VerifyMerkleTreeProofs(api frontend.API, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, leafIndexes []uints.U64, leaves [][]frontend.Variable, leafSiblingHashes [][]uints.U8, authPaths [][][]uints.U8, rootHash frontend.Variable) error {
-	//numOfLeavesProved := len(leaves)
+	numOfLeavesProved := len(leaves)
 
-	for i := range 1 {
+	for i := range numOfLeavesProved {
 		treeHeight := len(authPaths[i]) + 1
 		leafIndexBits := api.ToBinary(uapi.ToValue(leafIndexes[i]), treeHeight)
 		leafSiblingHash := typeConverters.LittleEndianFromUints(api, leafSiblingHashes[i])
