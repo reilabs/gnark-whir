@@ -38,6 +38,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	batchSizeLen := circuit.BatchSize
 
 	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, initialOODQueries, initialOODs)
+
 	if err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 
 		if r == 0 {
-			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, batchSizeLen, rootHashes, batchingRandomness, stirChallengeIndexes)
+			err = ValidateFirstRound(api, circuit, arthur, uapi, sc, frontend.Variable(circuit.BatchSize), rootHashes, batchingRandomness, stirChallengeIndexes, roundAnswers[0])
 			if err != nil {
 				return err
 			}
@@ -411,6 +412,7 @@ func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, intern
 		LeafSiblingHashes: firstRoundMerkleObject.ContainerLeafSiblingHashes,
 		AuthPaths:         firstRoundMerkleObject.ContainerAuthPaths,
 	}
+
 	var circuit = Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           contTranscript,
@@ -420,7 +422,6 @@ func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, intern
 		ParamNRounds:                         nRounds,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
-		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		FoldingFactorArray:                   foldingFactor,
 		MVParamsNumberOfVariables:            mvParamsNumberOfVariables,
@@ -458,12 +459,12 @@ func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, intern
 		LeafSiblingHashes: firstRoundMerkleObject.LeafSiblingHashes,
 		AuthPaths:         firstRoundMerkleObject.AuthPaths,
 	}
+
 	assignment := Circuit{
 		IO:                                   []byte(cfg.IOPattern),
 		Transcript:                           transcriptT,
 		FoldOptimisation:                     true,
 		InitialStatement:                     true,
-		CommittmentOODSamples:                1,
 		DomainSize:                           domainSize,
 		BatchSize:                            len(proof_arg.FirstRoundPaths),
 		StartingDomainBackingDomainGenerator: startingDomainGen,

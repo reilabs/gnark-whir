@@ -63,7 +63,6 @@ type Circuit struct {
 	// Inputs
 	DomainSize                           int
 	StartingDomainBackingDomainGenerator frontend.Variable
-	CommittmentOODSamples                int
 	FoldingFactorArray                   []int
 	FinalSumcheckRounds                  int
 	ParamNRounds                         int
@@ -204,7 +203,6 @@ func RunPoW(api frontend.API, sc *skyscraper.Skyscraper, arthur gnark_nimue.Arth
 func GenerateStirChallengePoints(api frontend.API, arthur gnark_nimue.Arthur, NQueries int, leafIndexes []uints.U64, domainSize int, circuit *Circuit, uapi *uints.BinaryField[uints.U64], expDomainGenerator frontend.Variable, roundIndex int) ([]frontend.Variable, error) {
 	finalIndexes, err := GetStirChallenges(api, *circuit, arthur, NQueries, domainSize, roundIndex)
 	if err != nil {
-		api.Println(err)
 		return nil, err
 	}
 
@@ -229,8 +227,37 @@ func GenerateCombinationRandomness(api frontend.API, arthur gnark_nimue.Arthur, 
 	}
 
 	combinationRandomness := utilities.ExpandRandomness(api, combRandomnessGen[0], randomnessLength)
+
 	return combinationRandomness, nil
 
+}
+
+func oodData(api frontend.API, oodAnswers [][]frontend.Variable, batchingRandomness frontend.Variable) []frontend.Variable {
+	if len(oodAnswers) == 0 {
+		return []frontend.Variable{}
+	}
+
+	result := make([]frontend.Variable, len(oodAnswers[0]))
+	for i, v := range oodAnswers[0] {
+		result[i] = v
+	}
+
+	multiplier := batchingRandomness
+
+	for round := 1; round < len(oodAnswers); round++ {
+		thisRound := oodAnswers[round]
+		currentMultiplier := multiplier
+		multiplier = api.Mul(multiplier, batchingRandomness)
+
+		api.AssertIsEqual(len(thisRound), len(result))
+
+		for i := range result {
+			term := api.Mul(thisRound[i], currentMultiplier)
+			result[i] = api.Add(result[i], term)
+		}
+	}
+
+	return result
 }
 
 func runSumcheckRounds(
@@ -252,6 +279,7 @@ func runSumcheckRounds(
 			return nil, nil, err
 		}
 		foldingRandomness[i] = foldingRandomnessTemp[0]
+
 		utilities.CheckSumOverBool(api, lastEval, sumcheckPolynomial)
 		lastEval = utilities.EvaluateQuadraticPolynomialFromEvaluationList(api, sumcheckPolynomial, foldingRandomness[i])
 	}
@@ -351,7 +379,7 @@ func SumcheckForR1CSIOP(api frontend.API, arthur gnark_nimue.Arthur, circuit *Ci
 	return t_rand, sp_rand, savedValForSumcheck, nil
 }
 
-func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.Arthur, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, batchSizeLen frontend.Variable, rootHashes []frontend.Variable, batchingRandomness frontend.Variable, stirChallengeIndexes []frontend.Variable) error {
+func ValidateFirstRound(api frontend.API, circuit *Circuit, arthur gnark_nimue.Arthur, uapi *uints.BinaryField[uints.U64], sc *skyscraper.Skyscraper, batchSizeLen frontend.Variable, rootHashes []frontend.Variable, batchingRandomness frontend.Variable, stirChallengeIndexes []frontend.Variable, roundAnswers [][]frontend.Variable) error {
 
 	for i := range circuit.FirstRoundPaths.Leaves {
 		err := VerifyMerkleTreeProofs(api, uapi, sc, circuit.FirstRoundPaths.LeafIndexes[i], circuit.FirstRoundPaths.Leaves[i], circuit.FirstRoundPaths.LeafSiblingHashes[i], circuit.FirstRoundPaths.AuthPaths[i], rootHashes[i])
@@ -379,7 +407,7 @@ func parseBatchedCommitment(api frontend.API, arthur gnark_nimue.Arthur, circuit
 	}
 
 	oodPoints := make([]frontend.Variable, 1)
-	oodAnswers := make([][]frontend.Variable, 2)
+	oodAnswers := make([][]frontend.Variable, circuit.BatchSize))
 
 	if err := arthur.FillChallengeScalars(oodPoints); err != nil {
 		return nil, nil, nil, nil, err

@@ -105,6 +105,7 @@ func main() {
 	}
 
 	configFile, err := os.ReadFile("../../../new-provekit/ProveKit/prover/params")
+
 	if err != nil {
 		fmt.Println(err)
 		return
