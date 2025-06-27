@@ -33,7 +33,7 @@ type ProofElement struct {
 }
 
 type ProofObject struct {
-	FirstRoundPaths              []ProofElement `json:"first_round_paths"`
+	FirstRoundPaths              []ProofElement `json:"round0_merkle_paths"`
 	MerklePaths                  []ProofElement `json:"merkle_paths"`
 	StatementValuesAtRandomPoint []Fp256        `json:"statement_values_at_random_point"`
 }
@@ -91,7 +91,7 @@ type R1CS struct {
 
 func main() {
 
-	proofFile, err := os.Open("../ProveKit/prover/proof")
+	proofFile, err := os.Open("../../../new-provekit/ProveKit/prover/proof")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -104,8 +104,7 @@ func main() {
 		return
 	}
 
-
-	configFile, err := os.ReadFile("../ProveKit/prover/params")
+	configFile, err := os.ReadFile("../../../new-provekit/ProveKit/prover/params")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -125,7 +124,7 @@ func main() {
 	}
 	fmt.Printf("io: %s\n", io.PPrint())
 
-	r1csFile, r1csErr := os.ReadFile("../ProveKit/r1cs.json")
+	r1csFile, r1csErr := os.ReadFile("../../../new-provekit/ProveKit/r1cs.json")
 	if r1csErr != nil {
 		fmt.Println(err)
 		return

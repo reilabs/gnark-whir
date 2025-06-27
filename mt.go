@@ -28,19 +28,31 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	api.Println(sp_rand)
 	api.Println(savedValForSumcheck)
 
-	batchSize, rootHashes, batchingRandomness, err := parseBatchedCommitment(api, arthur, circuit, uapi)
+	rootHashes, batchingRandomness, initialOODQueries, initialOODAnswers, err := parseBatchedCommitment(api, arthur, circuit)
 	if err != nil {
 		return err
 	}
 
-	batchSizeLen := typeConverters.LittleEndianFromUints(api, batchSize)
+	initialOODs := oodAnswers(api, initialOODAnswers, batchingRandomness)
 
-	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur)
+	batchSizeLen := circuit.BatchSize
+
+	initialSumcheckData, lastEval, initialSumcheckFoldingRandomness, err := initialSumcheck(api, circuit, arthur, initialOODQueries, initialOODs)
 	if err != nil {
 		return err
 	}
+	copyOfFirstLeaves := make([][][]frontend.Variable, len(circuit.FirstRoundPaths.Leaves))
+	for i := range len(circuit.FirstRoundPaths.Leaves) {
+		copyOfFirstLeaves[i] = make([][]frontend.Variable, len(circuit.FirstRoundPaths.Leaves[i]))
+		for j := range len(circuit.FirstRoundPaths.Leaves[i]) {
+			copyOfFirstLeaves[i][j] = make([]frontend.Variable, len(circuit.FirstRoundPaths.Leaves[i][j]))
+			for k := range len(circuit.FirstRoundPaths.Leaves[i][j]) {
+				copyOfFirstLeaves[i][j][k] = circuit.FirstRoundPaths.Leaves[i][j][k]
+			}
+		}
+	}
 
-	computedFolded := combineFirstRoundLeaves(api, circuit.FirstRoundPaths.Leaves, batchingRandomness)
+	computedFolded := combineFirstRoundLeaves(api, copyOfFirstLeaves, batchingRandomness)
 	roundAnswers := make([][][]frontend.Variable, len(circuit.MerklePaths.Leaves)+1)
 	roundAnswers[0] = computedFolded
 	for i := range len(circuit.MerklePaths.Leaves) {
@@ -56,6 +68,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	totalFoldingRandomness := initialSumcheckFoldingRandomness
 
 	rootHashList := make([]frontend.Variable, len(circuit.RoundParametersOODSamples))
+
 	for r := range circuit.RoundParametersOODSamples {
 
 		rootHash := make([]frontend.Variable, 1)
@@ -64,11 +77,12 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		}
 		rootHashList[r] = rootHash[0]
 
-		roundOODAnswers := []frontend.Variable{}
-		mainRoundData.OODPoints[r], roundOODAnswers, err = FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
+		a, roundOODAnswers, err := FillInOODPointsAndAnswers(circuit.RoundParametersOODSamples[r], arthur)
 		if err != nil {
 			return err
 		}
+
+		mainRoundData.OODPoints[r] = a
 
 		stirChallengeIndexes, err := GetStirChallenges(api, *circuit, arthur, circuit.RoundParametersNumOfQueries[r], domainSize, r)
 		if err != nil {
@@ -152,6 +166,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	evaluationOfWPoly := ComputeWPoly(
 		api,
 		circuit,
+		initialOODQueries,
 		initialSumcheckData,
 		mainRoundData,
 		sp_rand,
@@ -166,6 +181,37 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	// x := api.Mul(api.Sub(api.Mul(circuit.LinearStatementEvaluations[0], circuit.LinearStatementEvaluations[1]), circuit.LinearStatementEvaluations[2]), calculateEQ(api, sp_rand, t_rand))
 	// api.AssertIsEqual(savedValForSumcheck, x)
 	return nil
+}
+
+func oodAnswers(
+	api frontend.API,
+	answers [][]frontend.Variable,
+	randomness frontend.Variable,
+) (result []frontend.Variable) {
+
+	if len(answers) == 0 {
+		return nil
+	}
+
+	multiplier := frontend.Variable(1)
+
+	first := answers[0]
+	result = make([]frontend.Variable, len(first))
+	for j := range first {
+		result[j] = api.Mul(first[j], multiplier)
+	}
+
+	for i := 1; i < len(answers); i++ {
+		multiplier = api.Mul(multiplier, randomness)
+
+		round := answers[i]
+		for j := range round {
+			term := api.Mul(round[j], multiplier)
+			result[j] = api.Add(result[j], term)
+		}
+	}
+
+	return result
 }
 
 type MerkleObject struct {
@@ -256,7 +302,7 @@ func ParsePathsObject(proofElements []ProofElement) MerkleObject {
 	}
 }
 
-func verify_circuit(proof_arg ProofObject, cfg Config, matrixData MatrixData) {
+func verify_circuit(proof_arg ProofObject, cfg Config, internedR1CS R1CS, interner Interner) {
 	merkleObject := ParsePathsObject(proof_arg.MerklePaths)
 	firstRoundMerkleObject := ParsePathsObject(proof_arg.FirstRoundPaths)
 
